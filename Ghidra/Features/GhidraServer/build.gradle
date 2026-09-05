@@ -31,6 +31,8 @@ dependencies {
 	api project(":FileSystem")
 	api project(":DB")
 	api project(":Generic")
+	// 10.3+ shades Gson + JCIP; no unshaded json-smart
+	api "com.nimbusds:nimbus-jose-jwt:10.9.1"
 	
 	runGhidraServer project
 }
