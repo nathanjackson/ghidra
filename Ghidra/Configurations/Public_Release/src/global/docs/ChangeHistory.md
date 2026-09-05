@@ -11,12 +11,14 @@
 * _Importer:COFF_. Implemented the COFF `IMAGE_REL_ARM64_ADDR64` relocation. (GP-7088, Issue #9408)
 * _Importer:Mach-O_. Provided safer parsing of `dyld_shared_cache` files. (GP-7046)
 * _Logging_. Upgraded log4j to version 2.26.1. (GP-7134)
+* _Multi-User_. Added Ghidra Server OIDC authentication mode (`-a5`) using the OAuth 2.0 device-code grant. (GH-XXXX)
 * _Multi-User_. Corrected potential network performance issue related to Ghidra Server use.  Full benefit requires update of both Ghidra Server installation and Ghidra client software. (GP-7012, Issue #2752, #9316)
 * _Processors_. Made SparcV9 register display formatting more consistent. (GP-941)
 * _Scripting_. Updated the Structure Editor to perform a structure reload when the structure's description is changed outside of the editor. (GP-7118, Issue #9461)
 * _Search_. Updated __Find Uses of__ for FunctionDefinitions to find references inside of functions and function parameters. (GP-7044, Issue #9342)
 
 ### Bugs
+* _Multi-User_. Unknown users on `-a1` and `-a4` are no longer retried, avoiding identity-provider account lockout. (GH-XXXX)
 * _Analysis_. Fixed failure to recover switch instructions if the switch is computed with an instruction with internal pcode branching such as the  AARCH64 `csel` instruction. (GP-7023)
 * _BSim_. Improved `GhidraURL.toURL` to handle Ghidra URLs previously stored by BSim where proper URL encoding was never performed. (GP-6970, Issue #9275)
 * _Data Types_. Corrected BuiltIn GUID datatype alignment to be 4 bytes instead of 8 bytes.  Packed structures containing this datatype will need to be re-packed to pick up on this change. (GP-6953, Issue #9200)

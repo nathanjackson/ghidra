@@ -226,11 +226,26 @@ The Ghidra Server has been designed to support many  possible user authenticatio
   * __com.sun.security.auth.module.Krb5LoginModule__: Not recommended. This login module is used in 
     the `-a1` Active Directory via Kerberos authentication mode, and as such you should use it that 
     way.  
+
+* __OIDC via device-code grant (-a5)__: User authentication is performed against an OpenID Connect
+  identity provider using the OAuth 2.0 device authorization grant. The `-oidc <config_file>`
+  argument is required to specify the OIDC config file. A sample is supplied as _server/oidc.conf_.
+
+  The Ghidra Server never receives a password and does not host a loopback HTTP listener. Clients
+  complete a device-code login with the identity provider and return an ID token. User names are
+  mapped from ID token claims (by default `preferred_username`, then `email`, then `sub`) and are
+  always lowercased. For email addresses the local-part before `@` is used. The mapped name must
+  satisfy Ghidra's user-name rules (`[a-zA-Z0-9][a-zA-Z0-9.\-_]*`, maximum 64 characters).
+
+  Register a public/native OAuth client with device authorization enabled. The discovery document
+  must advertise `device_authorization_endpoint`, and `token_endpoint_auth_methods_supported` must
+  include `none` when that list is present. Do not put client secrets in `oidc.conf`. SSH
+  authentication (`-ssh`) is not supported with `-a5`.
 		
 * __Use of an SSH pre-shared key (-ssh</)__: Supported as an alternate form of authentication when 
   using Local Ghidra password (`-a0`). This SSH authentication is currently supported by the 
   Headless Analyzer only. See [SSH User Authentication](#ssh-user-authentication) for configuration
-  details.
+  details. SSH is not used with PKI (`-a2`) or OIDC (`-a5`).
 
 ([Back to Top][top])
 
@@ -312,13 +327,21 @@ directory (if not absolute).
 See _jaas.conf_ for examples and suggestions. It is the system administrator's responsibility to
 craft their own JAAS configuration directive when using the `-a4` mode.
 
+#### `-oidc <config_file>`
+Specifies the path to the OIDC config file (when using `-a5`), relative to the ghidra/server
+directory (if not absolute).
+
+See _oidc.conf_ for required and optional properties. Register a public/native OAuth client with
+device authorization enabled. Do not place client secrets in this file.
+
 #### `-u`
 Allows the server login user ID to be specified at time of login for `-a0` authentication mode. 
-Without this option, the users client-side login ID will be assumed.
+Without this option, the users client-side login ID will be assumed. This option is not used with
+PKI (`-a2`) or OIDC (`-a5`).
 
 #### `-autoProvision`
 Enable the auto-creation of new Ghidra Server users when they successfully authenticate to the 
-server (`-a1` and `-a4` modes only). Users removed from the authentication provider (e.g., Active 
+server (`-a1`, `-a4`, and `-a5` modes). Users removed from the authentication provider (e.g., Active 
 Directory) will need to be deleted manually from the Ghidra Server using `svrAdmin` command.
 	
 #### `-anonymous`
@@ -326,7 +349,8 @@ Enable anonymous access support for Ghidra Server and its repositories.  Only th
 which specifically enable anonymous access will be accessible as read-only to an anonymous user.
 
 #### `-ssh`
-Enable SSH as an alternate form of authentication when using `-a0` authentication mode.
+Enable SSH as an alternate form of authentication when using `-a0` authentication mode. SSH is
+not used with PKI (`-a2`) or OIDC (`-a5`).
 
 ([Back to Top][top])
 
