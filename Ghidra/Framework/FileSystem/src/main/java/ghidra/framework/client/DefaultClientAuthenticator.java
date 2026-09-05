@@ -16,6 +16,7 @@
 package ghidra.framework.client;
 
 import java.awt.Component;
+import java.io.IOException;
 import java.net.*;
 
 import javax.security.auth.callback.*;
@@ -24,11 +25,14 @@ import org.apache.commons.lang3.StringUtils;
 
 import docking.DockingWindowManager;
 import docking.widgets.*;
+import ghidra.framework.client.oidc.OidcDeviceCodeFlow;
 import ghidra.framework.preferences.Preferences;
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.OidcAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.util.Msg;
 import ghidra.util.SystemUtilities;
+import ghidra.util.exception.CancelledException;
 
 public class DefaultClientAuthenticator extends PopupKeyStorePasswordProvider
 		implements ClientAuthenticator {
@@ -167,6 +171,26 @@ public class DefaultClientAuthenticator extends PopupKeyStorePasswordProvider
 		}
 		finally {
 			dlg.dispose();
+		}
+	}
+
+	@Override
+	public boolean processOidcCallback(OidcAuthenticationCallback oidcCb,
+			AnonymousCallback anonymousCb, String serverName) throws IOException {
+		if (anonymousCb != null && anonymousCb.anonymousAccessRequested()) {
+			return true;
+		}
+		try {
+			OidcDeviceCodeFlow flow = new OidcDeviceCodeFlow();
+			String idToken = flow.complete(oidcCb, authorization -> {
+				Msg.showInfo(this, null, "Ghidra Server OIDC Sign-In",
+					OidcDeviceCodeFlow.formatSignInMessage(authorization));
+			}, () -> Thread.currentThread().isInterrupted());
+			oidcCb.setIdToken(idToken);
+			return true;
+		}
+		catch (CancelledException e) {
+			return false;
 		}
 	}
 

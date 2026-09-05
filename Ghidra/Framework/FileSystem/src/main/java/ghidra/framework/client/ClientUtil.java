@@ -464,6 +464,45 @@ public class ClientUtil {
 		}
 	}
 
+	static boolean processOidcCallback(Callback[] callbacks, String serverName, String loginError)
+			throws IOException {
+		getClientAuthenticator();
+		if (clientAuthenticator == null) {
+			Msg.error(ClientUtil.class, "Unable to authenticate user without ClientAuthenticator");
+			return false;
+		}
+		OidcAuthenticationCallback oidcCb = null;
+		AnonymousCallback anonymousCb = null;
+		for (Callback callback : callbacks) {
+			if (callback instanceof OidcAuthenticationCallback) {
+				oidcCb = (OidcAuthenticationCallback) callback;
+			}
+			else if (callback instanceof AnonymousCallback) {
+				anonymousCb = (AnonymousCallback) callback;
+			}
+		}
+		if (oidcCb == null) {
+			throw new IOException("OIDC authentication callback required");
+		}
+		// Anonymous is granted by the server before authenticate(); skip device flow.
+		if (anonymousCb != null && anonymousCb.anonymousAccessRequested()) {
+			Msg.info(ClientUtil.class, "Anonymous access requested for " + serverName);
+			return true;
+		}
+		if (!clientAuthenticator.processOidcCallback(oidcCb, anonymousCb, serverName)) {
+			return false;
+		}
+		if (anonymousCb != null && anonymousCb.anonymousAccessRequested()) {
+			Msg.info(ClientUtil.class, "Anonymous access requested for " + serverName);
+			return true;
+		}
+		if (oidcCb.getIdToken() == null || oidcCb.getIdToken().isBlank()) {
+			throw new IOException("OIDC ID token was not provided");
+		}
+		Msg.info(ClientUtil.class, "OIDC authenticating to " + serverName);
+		return true;
+	}
+
 	static boolean processSSHSignatureCallback(Callback[] callbacks, String serverName,
 			String defaultUserID) {
 		NameCallback nameCb = null;

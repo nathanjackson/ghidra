@@ -16,11 +16,13 @@
 package ghidra.framework.client;
 
 import java.awt.Component;
+import java.io.IOException;
 import java.net.Authenticator;
 
 import javax.security.auth.callback.*;
 
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.OidcAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.security.KeyStorePasswordProvider;
 
@@ -88,5 +90,21 @@ public interface ClientAuthenticator extends KeyStorePasswordProvider {
 	 */
 	public boolean processSSHSignatureCallbacks(String serverName, NameCallback nameCb,
 			SSHSignatureCallback sshCb);
+
+	/**
+	 * Process OIDC device-code authentication.
+	 * @param oidcCb OIDC callback with provider metadata. The handler must
+	 * {@link OidcAuthenticationCallback#setIdToken(String) set the ID token}
+	 * unless anonymous access is requested.
+	 * @param anonymousCb may be used to request anonymous read-only access to
+	 * the server. A null is specified if anonymous access has not been enabled
+	 * on the server.
+	 * @param serverName name of server
+	 * @return true if ID token set (or anonymous requested), false if cancelled
+	 * @throws IOException if device-code authorization fails
+	 * @see AnonymousCallback#setAnonymousAccessRequested(boolean)
+	 */
+	public boolean processOidcCallback(OidcAuthenticationCallback oidcCb,
+			AnonymousCallback anonymousCb, String serverName) throws IOException;
 
 }

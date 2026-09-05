@@ -24,11 +24,14 @@ import javax.security.auth.callback.*;
 
 import org.apache.commons.lang3.StringUtils;
 
+import ghidra.framework.client.oidc.OidcDeviceCodeFlow;
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.OidcAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.framework.remote.security.SSHKeyManager;
 import ghidra.net.DefaultKeyManagerFactory;
 import ghidra.util.Msg;
+import ghidra.util.exception.CancelledException;
 
 /**
  * <code>HeadlessClientAuthenticator</code> provides the ability to install a Ghidra Server 
@@ -41,6 +44,8 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 	private static Object sshPrivateKey;
 	private static String preferredName = null;
 	private static boolean passwordPromptAllowed;
+
+	private final OidcDeviceCodeFlow oidcFlow;
 
 	/**
 	 * Simple authentication handler using a default authenticator which may be passed to
@@ -102,6 +107,11 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 	};
 
 	HeadlessClientAuthenticator() {
+		this(null);
+	}
+
+	HeadlessClientAuthenticator(OidcDeviceCodeFlow oidcFlow) {
+		this.oidcFlow = oidcFlow;
 	}
 
 	@Override
@@ -359,6 +369,39 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 	@Override
 	public boolean isSSHKeyAvailable() {
 		return sshPrivateKey != null;
+	}
+
+	@Override
+	public boolean processOidcCallback(OidcAuthenticationCallback oidcCb,
+			AnonymousCallback anonymousCb, String serverName) throws IOException {
+		if (anonymousCb != null && anonymousCb.anonymousAccessRequested()) {
+			return true;
+		}
+		if (oidcCb == null || StringUtils.isBlank(oidcCb.getDeviceAuthorizationEndpoint())) {
+			// Never fall through to a password or JWT-paste prompt, even if -p is set.
+			throw new IOException(
+				"OIDC device authorization endpoint is missing. Headless OIDC login " +
+					"requires a device-code identity provider.");
+		}
+		try {
+			OidcDeviceCodeFlow flow = oidcFlow != null ? oidcFlow : new OidcDeviceCodeFlow();
+			String idToken = flow.complete(oidcCb, this::printDeviceAuthorization,
+				() -> Thread.currentThread().isInterrupted());
+			oidcCb.setIdToken(idToken);
+			return true;
+		}
+		catch (CancelledException e) {
+			return false;
+		}
+		catch (IOException e) {
+			Msg.error(this, e.getMessage());
+			throw e;
+		}
+	}
+
+	private void printDeviceAuthorization(
+			OidcDeviceCodeFlow.DeviceAuthorization authorization) {
+		System.err.println(OidcDeviceCodeFlow.formatSignInMessage(authorization));
 	}
 
 }

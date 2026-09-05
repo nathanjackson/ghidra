@@ -246,9 +246,21 @@ class ServerConnectTask extends Task {
 		try {
 			boolean loopOK = allowLoginRetry;
 			String loginError = null;
-			callbacks = gsh.getAuthenticationCallbacks();
+			try {
+				callbacks = gsh.getAuthenticationCallbacks();
+			}
+			catch (RemoteException e) {
+				Throwable cause = e.getCause();
+				if (cause instanceof UnmarshalException ||
+					cause instanceof ClassNotFoundException) {
+					throw new RemoteException("Incompatible Ghidra Server interface version" +
+						" (server may require a newer client for OIDC authentication)");
+				}
+				throw e;
+			}
 
 			SignatureCallback pkiSignatureCb = null;
+			OidcAuthenticationCallback oidcCb = null;
 			boolean hasSSHSignatureCallback = false;
 			if (callbacks != null) {
 				for (Callback cb : callbacks) {
@@ -257,6 +269,9 @@ class ServerConnectTask extends Task {
 					}
 					else if (cb instanceof SSHSignatureCallback) {
 						hasSSHSignatureCallback = true;
+					}
+					else if (cb instanceof OidcAuthenticationCallback) {
+						oidcCb = (OidcAuthenticationCallback) cb;
 					}
 				}
 			}
@@ -305,6 +320,22 @@ class ServerConnectTask extends Task {
 							ClientUtil.processSignatureCallback(server.getServerName(),
 								pkiSignatureCb);
 						}
+						else if (oidcCb != null) {
+							loopOK = false; // OIDC is not retried as a password prompt
+							boolean canCancel = monitor.isCancelEnabled();
+							monitor.setCancelEnabled(true);
+							Thread connectThread = Thread.currentThread();
+							try (ConnectCancelledListener cancelListener =
+								new ConnectCancelledListener(monitor, connectThread::interrupt)) {
+								if (!ClientUtil.processOidcCallback(callbacks,
+									server.getServerName(), loginError)) {
+									return null; // cancelled
+								}
+							}
+							finally {
+								monitor.setCancelEnabled(canCancel);
+							}
+						}
 						else {
 							// assume all other callback scenarios are password based
 							// anonymous option must be explicitly chosen over username/password
@@ -345,6 +376,9 @@ class ServerConnectTask extends Task {
 				for (Callback callback : callbacks) {
 					if (callback instanceof PasswordCallback) {
 						((PasswordCallback) callback).clearPassword();
+					}
+					else if (callback instanceof OidcAuthenticationCallback) {
+						((OidcAuthenticationCallback) callback).clearIdToken();
 					}
 				}
 			}

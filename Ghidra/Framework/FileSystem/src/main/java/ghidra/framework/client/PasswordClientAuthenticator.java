@@ -16,12 +16,14 @@
 package ghidra.framework.client;
 
 import java.awt.Component;
+import java.io.IOException;
 import java.net.Authenticator;
 import java.net.PasswordAuthentication;
 
 import javax.security.auth.callback.*;
 
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.OidcAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.net.DefaultKeyManagerFactory;
 
@@ -119,6 +121,12 @@ public class PasswordClientAuthenticator implements ClientAuthenticator {
 			return null;
 		}
 		return password.clone();
+	}
+
+	@Override
+	public boolean processOidcCallback(OidcAuthenticationCallback oidcCb,
+			AnonymousCallback anonymousCb, String serverName) throws IOException {
+		return false;
 	}
 
 }
