@@ -355,8 +355,8 @@ If used, allows the process owner's default userID to be overridden with the giv
 connecting to a Ghidra Server. In order to use this parameter, the server must be configured to 
 allow a non-default username (Ghidra server `-u` option).
 
-When the Ghidra Server uses OIDC authentication (`-a5`), this option supplies the RMI Subject only.
-The Ghidra user name is taken from the ID token. The server `-u` option is not used with OIDC.
+This option is not used when the Ghidra Server uses OIDC authentication (`-a5`). The Ghidra user
+name is taken from the ID token. The server `-u` option is not used with OIDC.
 
 [See here for more information regarding which authentication method to use](#authentication).
 
@@ -467,18 +467,18 @@ __*NOTE:__ The use of OpenSSH keys are not supported. The following command can 
 a suitable SSH key while avoiding the unsupported OpenSSH format: `ssh-keygen -b 2048 -t rsa -m pem`
 
 When the Ghidra Server uses OIDC authentication (`-a5`), Headless Analyzer starts the OAuth 2.0
-device-code flow automatically. No additional command-line flags are required, and [`-p`][password]
-is not used.
+device-code flow automatically. No additional command-line flags are required, and
+[`-p`][password] and [`-connect`][connect] are not used.
 
-On an interactive command line, sign-in instructions are printed to `stderr`. Prefer the printed
-`verification_uri_complete` URL when it is provided; otherwise visit `verification_uri` and enter
-the user code. After you complete sign-in at the identity provider, Headless Analyzer continues.
+On an interactive command line, sign-in instructions are printed to `stderr`. Open the URL shown
+after `Open:`, or visit the printed page and enter the user code. After you complete sign-in at the
+identity provider, Headless Analyzer continues.
 
 If the identity provider does not advertise a device authorization endpoint, authentication always
 fails. There is no prompt to paste a JWT or password, even if [`-p`][password] is specified.
 
-The [`-connect`][connect] option, if used, supplies the RMI Subject only. The Ghidra user name comes
-from the ID token. Batch, script, and CI use of OIDC is not supported.
+The Ghidra user name comes from the ID token, not from [`-connect`][connect] or the process owner's
+userID. Batch, script, and CI use of OIDC is not supported.
 
 ## Examples
 
