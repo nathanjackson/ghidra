@@ -65,6 +65,17 @@ public class ClientOidcAuthenticatorTest {
 	}
 
 	@Test
+	public void testDefaultAuthenticatorSkipsWhenAnonymousAlreadyRequested() throws Exception {
+		DefaultClientAuthenticator auth = new DefaultClientAuthenticator();
+		AnonymousCallback anonymous = new AnonymousCallback();
+		anonymous.setAnonymousAccessRequested(true);
+		OidcAuthenticationCallback oidc = newCallback("https://idp.example.test/device",
+			"https://idp.example.test/token");
+		assertTrue(auth.processOidcCallback(oidc, anonymous, "server.example.test"));
+		assertNull(oidc.getIdToken());
+	}
+
+	@Test
 	public void testHeadlessMissingDeviceEndpointFailsEvenWhenPasswordPromptAllowed()
 			throws Exception {
 		HeadlessClientAuthenticator.installHeadlessClientAuthenticator(null, null, true);

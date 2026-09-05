@@ -25,14 +25,13 @@ import org.apache.commons.lang3.StringUtils;
 
 import docking.DockingWindowManager;
 import docking.widgets.*;
-import ghidra.framework.client.oidc.OidcDeviceCodeFlow;
+import ghidra.framework.client.oidc.OidcLoginDialog;
 import ghidra.framework.preferences.Preferences;
 import ghidra.framework.remote.AnonymousCallback;
 import ghidra.framework.remote.OidcAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.util.Msg;
 import ghidra.util.SystemUtilities;
-import ghidra.util.exception.CancelledException;
 
 public class DefaultClientAuthenticator extends PopupKeyStorePasswordProvider
 		implements ClientAuthenticator {
@@ -180,25 +179,29 @@ public class DefaultClientAuthenticator extends PopupKeyStorePasswordProvider
 		if (anonymousCb != null && anonymousCb.anonymousAccessRequested()) {
 			return true;
 		}
+		OidcLoginDialog dlg = new OidcLoginDialog(oidcCb, anonymousCb, serverName);
 		try {
-			OidcDeviceCodeFlow flow = new OidcDeviceCodeFlow();
-			OidcDeviceCodeFlow.DeviceAuthorization authorization =
-				flow.requestDeviceAuthorization(oidcCb);
-			String message = OidcDeviceCodeFlow.formatSignInMessage(authorization);
-			// stderr so user_code is visible without logging at INFO (PR 5 owns the dialog)
-			System.err.println(message);
-			int choice = OptionDialog.showOptionDialog(null, "Ghidra Server OIDC Sign-In",
-				message, "Continue", OptionDialog.INFORMATION_MESSAGE);
-			if (choice != OptionDialog.OPTION_ONE) {
-				return false;
+			DockingWindowManager winMgr = DockingWindowManager.getActiveInstance();
+			Component rootFrame = winMgr != null ? winMgr.getRootFrame() : null;
+			DockingWindowManager.showDialog(rootFrame, dlg);
+			if (dlg.anonymousAccessRequested()) {
+				if (anonymousCb != null) {
+					anonymousCb.setAnonymousAccessRequested(true);
+				}
+				return true;
 			}
-			String idToken = flow.pollForIdToken(oidcCb, authorization,
-				() -> Thread.currentThread().isInterrupted());
-			oidcCb.setIdToken(idToken);
-			return true;
-		}
-		catch (CancelledException e) {
+			IOException failure = dlg.getFailure();
+			if (failure != null) {
+				throw failure;
+			}
+			if (dlg.okWasPressed()) {
+				oidcCb.setIdToken(dlg.getIdToken());
+				return true;
+			}
 			return false;
+		}
+		finally {
+			dlg.dispose();
 		}
 	}
 
