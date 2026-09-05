@@ -38,6 +38,7 @@ public final class OidcLoginChallengeStore {
 	private final int maxInFlight;
 	private final LongSupplier clock;
 	private final Map<String, IssuedChallenge> cache = new ConcurrentHashMap<>();
+	private final Object issueLock = new Object();
 	private final ScheduledExecutorService scheduler;
 
 	public OidcLoginChallengeStore(int ttlSeconds) {
@@ -72,15 +73,17 @@ public final class OidcLoginChallengeStore {
 	 * @throws IllegalStateException if the in-flight cap has been reached
 	 */
 	public IssuedChallenge issue() {
-		cleanup();
-		if (cache.size() >= maxInFlight) {
-			throw new IllegalStateException("Too many in-flight OIDC logins");
+		synchronized (issueLock) {
+			cleanupUnlocked();
+			if (cache.size() >= maxInFlight) {
+				throw new IllegalStateException("Too many in-flight OIDC logins");
+			}
+			String nonce = randomToken();
+			String challenge = randomToken();
+			IssuedChallenge issued = new IssuedChallenge(nonce, challenge, clock.getAsLong());
+			cache.put(challenge, issued);
+			return issued;
 		}
-		String nonce = randomToken();
-		String challenge = randomToken();
-		IssuedChallenge issued = new IssuedChallenge(nonce, challenge, clock.getAsLong());
-		cache.put(challenge, issued);
-		return issued;
 	}
 
 	/**
@@ -109,6 +112,12 @@ public final class OidcLoginChallengeStore {
 	}
 
 	private void cleanup() {
+		synchronized (issueLock) {
+			cleanupUnlocked();
+		}
+	}
+
+	private void cleanupUnlocked() {
 		long now = clock.getAsLong();
 		cache.entrySet().removeIf(e -> now - e.getValue().issuedAtMs >= ttlMillis);
 	}

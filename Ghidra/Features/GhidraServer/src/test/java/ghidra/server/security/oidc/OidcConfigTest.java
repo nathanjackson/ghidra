@@ -75,13 +75,17 @@ public class OidcConfigTest {
 
 	@Test
 	public void testHttpNonLoopbackIssuerRejected() throws Exception {
-		try {
-			load("issuer=http://idp.example.test\nclientId=ghidra-client\n");
-			fail("Expected http issuer to be rejected");
-		}
-		catch (IllegalArgumentException e) {
-			assertTrue(e.getMessage(), e.getMessage().contains("https"));
-		}
+		assertHttpRejected("issuer=http://idp.example.test\nclientId=ghidra-client\n");
+	}
+
+	@Test
+	public void testHttpLiteralIpRejected() throws Exception {
+		assertHttpRejected("issuer=http://8.8.8.8\nclientId=ghidra-client\n");
+	}
+
+	@Test
+	public void testHttpOtherLoopbackOctetRejected() throws Exception {
+		assertHttpRejected("issuer=http://127.0.0.2\nclientId=ghidra-client\n");
 	}
 
 	@Test
@@ -90,6 +94,26 @@ public class OidcConfigTest {
 			"issuer=http://127.0.0.1:8080/realms/ghidra\n" +
 				"clientId=ghidra-client\n");
 		assertEquals("http://127.0.0.1:8080/realms/ghidra", config.getIssuer());
+	}
+
+	@Test
+	public void testHttpLocalhostIssuerAccepted() throws Exception {
+		OidcConfig config = load("issuer=http://LOCALHOST:8080\nclientId=ghidra-client\n");
+		assertEquals("http://LOCALHOST:8080", config.getIssuer());
+	}
+
+	@Test
+	public void testHttpIpv6LoopbackIssuerAccepted() throws Exception {
+		OidcConfig config = load("issuer=http://[::1]:8080\nclientId=ghidra-client\n");
+		assertEquals("http://[::1]:8080", config.getIssuer());
+	}
+
+	@Test
+	public void testHttpLoopbackJwksUriRejected() throws Exception {
+		assertHttpRejected(
+			"issuer=https://issuer.example.test\n" +
+				"clientId=ghidra-client\n" +
+				"jwksUri=http://127.0.0.1:8080/jwks\n");
 	}
 
 	@Test
@@ -140,5 +164,15 @@ public class OidcConfigTest {
 		File file = tempFolder.newFile();
 		Files.writeString(file.toPath(), contents, StandardCharsets.UTF_8);
 		return OidcConfig.load(file);
+	}
+
+	private void assertHttpRejected(String contents) throws Exception {
+		try {
+			load(contents);
+			fail("Expected http URL to be rejected");
+		}
+		catch (IllegalArgumentException e) {
+			assertTrue(e.getMessage(), e.getMessage().contains("https"));
+		}
 	}
 }

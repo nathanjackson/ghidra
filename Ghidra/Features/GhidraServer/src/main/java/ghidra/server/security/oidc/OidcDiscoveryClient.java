@@ -127,7 +127,7 @@ public final class OidcDiscoveryClient {
 		if (isBlank(metadata.jwksUri)) {
 			throw new IOException("OIDC discovery did not advertise jwks_uri");
 		}
-		requireHttpsDiscoveryUrl(metadata.jwksUri, "jwks_uri");
+		requireHttpsDiscoveryUrl(metadata.jwksUri, "jwks_uri", false);
 
 		if (metadata.tokenEndpointAuthMethodsSupported != null &&
 			!metadata.tokenEndpointAuthMethodsSupported.isEmpty() &&
@@ -188,7 +188,7 @@ public final class OidcDiscoveryClient {
 
 		try {
 			String discoveredIssuer = JSONObjectUtils.getString(json, "issuer");
-			if (!isBlank(discoveredIssuer) &&
+			if (isBlank(discoveredIssuer) ||
 				!OidcConfig.stripTrailingSlash(discoveredIssuer).equals(issuer)) {
 				throw new IOException("OIDC discovery issuer mismatch");
 			}
@@ -243,8 +243,13 @@ public final class OidcDiscoveryClient {
 	}
 
 	private static void requireHttpsDiscoveryUrl(String value, String name) throws IOException {
+		requireHttpsDiscoveryUrl(value, name, true);
+	}
+
+	private static void requireHttpsDiscoveryUrl(String value, String name,
+			boolean allowLoopbackHttp) throws IOException {
 		try {
-			OidcConfig.requireHttpsUrl(value, name);
+			OidcConfig.requireHttpsUrl(value, name, allowLoopbackHttp);
 		}
 		catch (IllegalArgumentException e) {
 			throw new IOException(e.getMessage(), e);

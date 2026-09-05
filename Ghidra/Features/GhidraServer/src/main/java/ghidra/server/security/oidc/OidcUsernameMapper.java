@@ -33,8 +33,7 @@ import ghidra.server.UserManager;
 import ghidra.util.NumericUtilities;
 
 /**
- * Maps verified ID-token claims to a Ghidra user name. This is the only
- * name gate for OIDC authentication.
+ * Maps verified ID-token claims to a Ghidra user name.
  */
 public final class OidcUsernameMapper {
 

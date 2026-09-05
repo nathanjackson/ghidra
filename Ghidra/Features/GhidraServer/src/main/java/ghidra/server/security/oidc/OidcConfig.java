@@ -19,9 +19,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -133,11 +131,11 @@ public final class OidcConfig {
 		if (isBlank(audience)) {
 			audience = clientId;
 		}
-		String jwksUri = optionalUrl(properties, "jwksUri");
+		String jwksUri = optionalUrl(properties, "jwksUri", false);
 		File jwksFile = optionalFile(properties, "jwksFile", configFile.getParentFile());
 		String deviceAuthorizationEndpoint =
-			optionalUrl(properties, "deviceAuthorizationEndpoint");
-		String tokenEndpoint = optionalUrl(properties, "tokenEndpoint");
+			optionalUrl(properties, "deviceAuthorizationEndpoint", true);
+		String tokenEndpoint = optionalUrl(properties, "tokenEndpoint", true);
 		String tenantId = blankToNull(properties.getProperty("tenantId"));
 		String hostedDomain = blankToNull(properties.getProperty("hostedDomain"));
 		String displayName = blankToNull(properties.getProperty("displayName"));
@@ -225,12 +223,22 @@ public final class OidcConfig {
 	}
 
 	static String requireHttpsUrl(String value, String name) {
+		return requireHttpsUrl(value, name, true);
+	}
+
+	/**
+	 * Require an https URL. When {@code allowLoopbackHttp} is true, HTTP is
+	 * accepted only for the literal hosts {@code 127.0.0.1}, {@code localhost},
+	 * and {@code ::1}. Remote JWKS URLs must always be https.
+	 */
+	static String requireHttpsUrl(String value, String name, boolean allowLoopbackHttp) {
 		URI uri = parseUri(value, name);
 		String scheme = uri.getScheme();
 		if ("https".equalsIgnoreCase(scheme)) {
 			return stripTrailingSlash(value.trim());
 		}
-		if ("http".equalsIgnoreCase(scheme) && isLoopbackHost(uri.getHost())) {
+		if (allowLoopbackHttp && "http".equalsIgnoreCase(scheme) &&
+			isLoopbackHost(uri.getHost())) {
 			return stripTrailingSlash(value.trim());
 		}
 		throw new IllegalArgumentException(name + " must be an https URL");
@@ -240,12 +248,11 @@ public final class OidcConfig {
 		if (host == null || host.isBlank()) {
 			return false;
 		}
-		try {
-			return InetAddress.getByName(host).isLoopbackAddress();
+		if (host.startsWith("[") && host.endsWith("]") && host.length() > 2) {
+			host = host.substring(1, host.length() - 1);
 		}
-		catch (UnknownHostException e) {
-			return false;
-		}
+		return "127.0.0.1".equals(host) || "localhost".equalsIgnoreCase(host) ||
+			"::1".equals(host);
 	}
 
 	static String stripTrailingSlash(String value) {
@@ -282,12 +289,13 @@ public final class OidcConfig {
 		return value != null ? value : defaultValue;
 	}
 
-	private static String optionalUrl(Properties properties, String key) {
+	private static String optionalUrl(Properties properties, String key,
+			boolean allowLoopbackHttp) {
 		String value = blankToNull(properties.getProperty(key));
 		if (value == null) {
 			return null;
 		}
-		return requireHttpsUrl(value, key);
+		return requireHttpsUrl(value, key, allowLoopbackHttp);
 	}
 
 	private static File optionalFile(Properties properties, String key, File relativeTo) {

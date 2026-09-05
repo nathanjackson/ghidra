@@ -72,8 +72,53 @@ public class OidcDiscoveryClientTest {
 			OidcDiscoveryClient.validateDeviceCodeSupport(metadata, Set.of("RS256", "ES256"));
 		assertEquals(issuer + "/device", metadata.deviceAuthorizationEndpoint);
 		assertEquals(issuer + "/token", metadata.tokenEndpoint);
-		assertEquals(issuer + "/jwks", metadata.jwksUri);
+		assertEquals("https://issuer.example.test/jwks", metadata.jwksUri);
 		assertTrue(algs.contains("RS256"));
+	}
+
+	@Test
+	public void testDiscoveryMissingIssuerRejected() throws Exception {
+		String issuer = startDiscoveryServer(
+			"{\"token_endpoint\":\"PLACEHOLDER/token\"," +
+				"\"device_authorization_endpoint\":\"PLACEHOLDER/device\"," +
+				"\"jwks_uri\":\"https://issuer.example.test/jwks\"}");
+		try {
+			newClient().getMetadata(issuer);
+			fail("Expected missing discovered issuer to fail");
+		}
+		catch (IOException e) {
+			assertTrue(e.getMessage(), e.getMessage().contains("issuer mismatch"));
+		}
+	}
+
+	@Test
+	public void testDiscoveryBlankIssuerRejected() throws Exception {
+		String issuer = startDiscoveryServer(
+			"{\"issuer\":\"  \"," +
+				"\"token_endpoint\":\"PLACEHOLDER/token\"," +
+				"\"device_authorization_endpoint\":\"PLACEHOLDER/device\"," +
+				"\"jwks_uri\":\"https://issuer.example.test/jwks\"}");
+		try {
+			newClient().getMetadata(issuer);
+			fail("Expected blank discovered issuer to fail");
+		}
+		catch (IOException e) {
+			assertTrue(e.getMessage(), e.getMessage().contains("issuer mismatch"));
+		}
+	}
+
+	@Test
+	public void testLoopbackHttpJwksUriRejected() {
+		ProviderMetadata metadata = new ProviderMetadata("http://127.0.0.1:8080",
+			"http://127.0.0.1:8080/device", "http://127.0.0.1:8080/token",
+			"http://127.0.0.1:8080/jwks", List.of("none"), List.of("RS256"));
+		try {
+			OidcDiscoveryClient.validateDeviceCodeSupport(metadata, Set.of("RS256"));
+			fail("Expected loopback HTTP jwks_uri to be rejected");
+		}
+		catch (IOException e) {
+			assertTrue(e.getMessage(), e.getMessage().contains("https"));
+		}
 	}
 
 	@Test
@@ -181,7 +226,7 @@ public class OidcDiscoveryClientTest {
 		if (token) {
 			json.append(",\"token_endpoint\":\"PLACEHOLDER/token\"");
 		}
-		json.append(",\"jwks_uri\":\"PLACEHOLDER/jwks\"");
+		json.append(",\"jwks_uri\":\"https://issuer.example.test/jwks\"");
 		if (authMethods != null) {
 			json.append(",\"token_endpoint_auth_methods_supported\":")
 					.append(toJsonArray(authMethods));
