@@ -68,8 +68,19 @@ public class ServerTestUtil {
 		"CN=Ghidra Test Server, O=Ghidra, OU=Test, C=US";
 	public static final String TEST_PKI_CA_DN = "CN=Ghidra Test CA, O=Ghidra, OU=Test, C=US";
 
-	private static String[] AUTH_MODES =
-		new String[] { "Private Password", "NT Login Password", "PKI", "NT/Private Password" };
+	// Names for GhidraServer -a#; index 3 is unused (there is no mode 3).
+	private static final String[] AUTH_MODES = new String[] { "Private Password",
+		"NT Login Password", "PKI", "", "JAAS", "OIDC" };
+
+	private static String authModeName(int authMode) {
+		if (authMode < 0) {
+			return "None";
+		}
+		if (authMode < AUTH_MODES.length && !AUTH_MODES[authMode].isEmpty()) {
+			return AUTH_MODES[authMode];
+		}
+		return Integer.toString(authMode);
+	}
 
 	public static final URL TEST_REPO_URL =
 		GhidraURL.makeURL(LOCALHOST, GHIDRA_TEST_SERVER_PORT, "Test");
@@ -302,7 +313,7 @@ public class ServerTestUtil {
 	 * @param testRepositoryArchiveZipPath zip resource path to an archive
 	 * containing the contents of a server repository
 	 * @param port RMI registry port, 0 indicates that default port should be used
-	 * @param authMode primary authentication mode (0-3, -1=None, see GhidraServer)
+	 * @param authMode primary authentication mode (0,1,2,4,5; -1=None, see GhidraServer)
 	 * @param enableAltLoginName if true alternate login name will be 
 	 * enabled for those modes which support it.
 	 * @param enableSSHAuthentication enable SSH authentication if true
@@ -410,15 +421,18 @@ public class ServerTestUtil {
 	 * This server must be disposed before attempting to create another.
 	 * @param dirPath server root directory
 	 * @param port RMI registry port, 0 indicates that default port should be used
-	 * @param authMode authentication mode (-1 for no authentication)
+	 * @param authMode authentication mode (-1 for no authentication; 0,1,2,4,5)
 	 * @param enableAltLoginName if true enable alternate login name
 	 * @param enableSSHAuthentication if true SSH authentication will be enabled
 	 * @param enableAnonymousAuthentication if true anonymous usage is allowed
+	 * @param extraArgs additional Ghidra Server command-line arguments inserted
+	 * before the repository path (for example {@code -oidc}, a config file path,
+	 * and {@code -autoProvision})
 	 * @throws IOException
 	 */
 	public static synchronized void startServer(String dirPath, int port, int authMode,
 			boolean enableAltLoginName, boolean enableSSHAuthentication,
-			boolean enableAnonymousAuthentication) throws IOException {
+			boolean enableAnonymousAuthentication, String... extraArgs) throws IOException {
 
 		// Set client-side compression to match server
 		DataBuffer.enableCompressedSerializationOutput(enableCompressionOnServerStart);
@@ -428,8 +442,7 @@ public class ServerTestUtil {
 		}
 
 		Msg.debug(ServerTestUtil.class, "--- Preparing to start Ghidra Server ---");
-		Msg.debug(ServerTestUtil.class,
-			"     Authentication: " + (authMode < 0 ? "None" : AUTH_MODES[authMode]));
+		Msg.debug(ServerTestUtil.class, "     Authentication: " + authModeName(authMode));
 		Msg.debug(ServerTestUtil.class, "     Enable Alternate Login Name: " + enableAltLoginName);
 		Msg.debug(ServerTestUtil.class,
 			"     Enable Anonymous Login: " + enableAnonymousAuthentication);
@@ -477,6 +490,14 @@ public class ServerTestUtil {
 		}
 		if (enableAnonymousAuthentication) {
 			argList.add("-anonymous");
+		}
+
+		if (extraArgs != null) {
+			for (String extra : extraArgs) {
+				if (extra != null) {
+					argList.add(extra);
+				}
+			}
 		}
 
 		argList.add("-ip" + LOCALHOST); // bind to loopback interface

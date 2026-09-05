@@ -8,6 +8,7 @@
 * [Server Memory Considerations](#server-memory-considerations)
 * [Note regarding use of DNS (name lookup service)](#note-regarding-use-of-dns-name-lookup-service)
 * [User Authentication](#user-authentication)
+* [OIDC Identity Provider Setup](#oidc-identity-provider-setup)
 * [SSH User Authentication](#ssh-user-authentication)
 * [Server Options](#server-options)
 * [Running Ghidra Server on Microsoft Windows](#running-ghidra-server-on-microsoft-windows)
@@ -240,12 +241,53 @@ The Ghidra Server has been designed to support many  possible user authenticatio
   Register a public/native OAuth client with device authorization enabled. The discovery document
   must advertise `device_authorization_endpoint`, and `token_endpoint_auth_methods_supported` must
   include `none` when that list is present. Do not put client secrets in `oidc.conf`. SSH
-  authentication (`-ssh`) is not supported with `-a5`.
+  authentication (`-ssh`) is not supported with `-a5`. See
+  [OIDC Identity Provider Setup](#oidc-identity-provider-setup) for Entra ID, Keycloak, and Okta
+  recipes.
 		
 * __Use of an SSH pre-shared key (-ssh</)__: Supported as an alternate form of authentication when 
   using Local Ghidra password (`-a0`). This SSH authentication is currently supported by the 
   Headless Analyzer only. See [SSH User Authentication](#ssh-user-authentication) for configuration
   details. SSH is not used with PKI (`-a2`) or OIDC (`-a5`).
+
+([Back to Top][top])
+
+## OIDC Identity Provider Setup
+Ghidra Server `-a5` authenticates users with the OAuth 2.0 device authorization grant. Register a
+__public/native__ application with __device authorization enabled__. The client must issue ID tokens.
+Do not configure a client secret. A redirect URI is not required for this v1 device-code flow.
+
+Copy _server/oidc.conf_ and set at least `issuer` and `clientId`. Discovery must advertise
+`device_authorization_endpoint`. When `token_endpoint_auth_methods_supported` is present it must
+include `none`. User names are mapped from ID token claims (by default `preferred_username`, then
+`email`, then `sub`) and are always lowercased; for email addresses the local-part before `@` is
+used.
+
+### Microsoft Entra ID
+Register a __Mobile and desktop__ / public client application. Enable __Allow public client flows__
+so the device authorization grant is permitted.
+
+* Issuer: `https://login.microsoftonline.com/{tenant}/v2.0`
+* Optional `tenantId` in `oidc.conf` (matched against the ID token `tid` claim)
+* `preferred_username` is the user principal name (UPN)
+
+### Keycloak
+Create a __public__ client in the realm. Enable __OAuth 2.0 Device Authorization Grant__ on the
+realm. Leave Direct access grants (resource-owner password) off.
+
+* Issuer is typically `https://<keycloak-host>/realms/<realm>`
+* Discovery must include `device_authorization_endpoint`
+
+### Okta
+Create a __Native__ application. Enable the device authorization grant on the authorization server
+used by that application.
+
+* Issuer is the authorization server issuer URL (custom or org authorization server)
+* Discovery must include `device_authorization_endpoint`
+
+### Google Identity
+__Not a v1 target.__ Google restricts the OAuth 2.0 device authorization grant; Ghidra does not
+document a working Google Identity recipe for `-a5`.
 
 ([Back to Top][top])
 
