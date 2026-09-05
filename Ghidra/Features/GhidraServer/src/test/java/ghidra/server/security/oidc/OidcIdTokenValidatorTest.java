@@ -17,6 +17,7 @@ package ghidra.server.security.oidc;
 
 import static org.junit.Assert.*;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Collections;
@@ -70,7 +71,7 @@ public class OidcIdTokenValidatorTest {
 	@Test
 	public void testAlgNoneRejected() throws Exception {
 		PlainJWT plain = new PlainJWT(validClaims().build());
-		assertRejected(plain.serialize());
+		assertRejected(plain.serialize(), "signing algorithm is not allowed");
 	}
 
 	@Test
@@ -78,13 +79,19 @@ public class OidcIdTokenValidatorTest {
 		Date now = new Date();
 		JWTClaimsSet.Builder claims = validClaims(new Date(now.getTime() - 120_000L),
 			new Date(now.getTime() - 60_000L));
-		assertRejected(sign(claims.build()));
+		assertRejected(sign(claims.build()), "Expired JWT");
 	}
 
 	@Test
 	public void testWrongAudienceRejected() throws Exception {
 		JWTClaimsSet claims = validClaims().audience("other-client").build();
-		assertRejected(sign(claims));
+		assertRejected(sign(claims), "aud claim rejected");
+	}
+
+	@Test
+	public void testWrongIssuerRejected() throws Exception {
+		JWTClaimsSet claims = validClaims().issuer("https://other-issuer.example.test").build();
+		assertRejected(sign(claims), "iss claim value rejected");
 	}
 
 	@Test
@@ -93,7 +100,7 @@ public class OidcIdTokenValidatorTest {
 			new JWEHeader.Builder(JWEAlgorithm.RSA_OAEP_256, EncryptionMethod.A256GCM).build(),
 			validClaims().build());
 		jwe.encrypt(new RSAEncrypter(rsaKey.toPublicJWK()));
-		assertRejected(jwe.serialize());
+		assertRejected(jwe.serialize(), "Only compact JWS");
 	}
 
 	@Test
@@ -103,7 +110,7 @@ public class OidcIdTokenValidatorTest {
 		SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.HS256).build(),
 			validClaims().build());
 		jwt.sign(new MACSigner(hmacKey));
-		assertRejected(jwt.serialize());
+		assertRejected(jwt.serialize(), "signing algorithm is not allowed");
 	}
 
 	@Test
@@ -115,20 +122,26 @@ public class OidcIdTokenValidatorTest {
 		SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.HS256).build(),
 			validClaims().build());
 		jwt.sign(new MACSigner(hmacKey));
-		assertRejected(jwt.serialize());
+		assertRejected(jwt.serialize(), "signing algorithm is not allowed");
 	}
 
 	@Test
 	public void testMissingSubRejected() throws Exception {
 		JWTClaimsSet claims = validClaims().subject(null).build();
-		assertRejected(sign(claims));
+		assertRejected(sign(claims), "missing required claims");
+	}
+
+	@Test
+	public void testBlankSubRejected() throws Exception {
+		JWTClaimsSet claims = validClaims().subject("  ").build();
+		assertRejected(sign(claims), "missing sub claim");
 	}
 
 	@Test
 	public void testNoncePresentAndWrongRejected() throws Exception {
 		OidcIdTokenValidator nonceValidator = validatorWithNonce("expected-nonce");
 		JWTClaimsSet claims = validClaims().claim("nonce", "wrong-nonce").build();
-		assertRejected(nonceValidator, sign(claims));
+		assertRejected(nonceValidator, sign(claims), "nonce mismatch");
 	}
 
 	@Test
@@ -150,12 +163,13 @@ public class OidcIdTokenValidatorTest {
 	@Test
 	public void testTokenUseAccessRejected() throws Exception {
 		JWTClaimsSet claims = validClaims().claim("token_use", "access").build();
-		assertRejected(sign(claims));
+		assertRejected(sign(claims), "Access tokens are not accepted");
 	}
 
 	@Test
 	public void testTypAtJwtRejected() throws Exception {
-		assertRejected(sign(validClaims().build(), new JOSEObjectType("at+jwt")));
+		assertRejected(sign(validClaims().build(), new JOSEObjectType("at+jwt")),
+			"Access token typ is not accepted");
 	}
 
 	@Test
@@ -166,7 +180,7 @@ public class OidcIdTokenValidatorTest {
 				.build();
 		SignedJWT jwt = new SignedJWT(header, validClaims().build());
 		jwt.sign(new RSASSASigner(rsaKey));
-		assertRejected(jwt.serialize());
+		assertRejected(jwt.serialize(), "crit header is not allowed");
 	}
 
 	@Test
@@ -177,7 +191,19 @@ public class OidcIdTokenValidatorTest {
 		Date now = new Date();
 		JWTClaimsSet claims = validClaims(new Date(now.getTime() - 120_000L),
 			new Date(now.getTime() + 300_000L)).build();
-		assertRejected(ageValidator, sign(claims));
+		assertRejected(ageValidator, sign(claims), "exceeds max age");
+	}
+
+	@Test
+	public void testRemoteJwksRequiresHttps() throws Exception {
+		try {
+			OidcIdTokenValidator.createRemoteJwkSource(
+				URI.create("http://idp.example.test/jwks.json").toURL());
+			fail("Expected non-https JWKS URL to be rejected");
+		}
+		catch (IllegalArgumentException e) {
+			assertTrue(e.getMessage(), e.getMessage().contains("https"));
+		}
 	}
 
 	private OidcIdTokenValidator validatorWithNonce(String expectedNonce) {
@@ -213,19 +239,32 @@ public class OidcIdTokenValidatorTest {
 		return jwt.serialize();
 	}
 
-	private void assertRejected(String compact) {
-		assertRejected(validator, compact);
+	private void assertRejected(String compact, String expectedFragment) {
+		assertRejected(validator, compact, expectedFragment);
 	}
 
-	private static void assertRejected(OidcIdTokenValidator idTokenValidator, String compact) {
+	private static void assertRejected(OidcIdTokenValidator idTokenValidator, String compact,
+			String expectedFragment) {
 		try {
 			idTokenValidator.validate(compact);
 			fail("Expected ID token to be rejected");
 		}
 		catch (OidcIdTokenException e) {
 			assertNotNull(e.getMessage());
-			assertFalse(compact != null && e.getMessage() != null &&
-				compact.length() > 20 && e.getMessage().contains(compact));
+			assertTrue("Expected message to contain '" + expectedFragment + "', got: " +
+				exceptionText(e), exceptionText(e).contains(expectedFragment));
+			assertFalse(compact != null && compact.length() > 20 &&
+				exceptionText(e).contains(compact));
 		}
+	}
+
+	private static String exceptionText(Throwable error) {
+		StringBuilder text = new StringBuilder();
+		for (Throwable t = error; t != null; t = t.getCause()) {
+			if (t.getMessage() != null) {
+				text.append(t.getMessage()).append('\n');
+			}
+		}
+		return text.toString();
 	}
 }

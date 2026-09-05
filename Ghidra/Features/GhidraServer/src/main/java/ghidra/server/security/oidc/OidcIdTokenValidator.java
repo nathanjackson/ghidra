@@ -29,8 +29,12 @@ import com.nimbusds.jose.jwk.source.JWKSourceBuilder;
 import com.nimbusds.jose.proc.BadJOSEException;
 import com.nimbusds.jose.proc.JWSVerificationKeySelector;
 import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jose.util.DefaultResourceRetriever;
+import com.nimbusds.jwt.JWT;
 import com.nimbusds.jwt.JWTClaimNames;
 import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.JWTParser;
+import com.nimbusds.jwt.PlainJWT;
 import com.nimbusds.jwt.SignedJWT;
 import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
 import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier;
@@ -49,6 +53,9 @@ public final class OidcIdTokenValidator {
 
 	public static final Set<String> DEFAULT_ALLOWED_SIGNING_ALGS =
 		Collections.unmodifiableSet(new LinkedHashSet<>(Arrays.asList("RS256", "ES256")));
+
+	static final int JWKS_HTTP_TIMEOUT_MS = 10_000;
+	static final long JWKS_CACHE_TTL_MS = 15 * 60_000L;
 
 	private static final String TOKEN_USE_CLAIM = "token_use";
 	private static final String NONCE_CLAIM = "nonce";
@@ -104,13 +111,25 @@ public final class OidcIdTokenValidator {
 	}
 
 	/**
-	 * Remote JWKS with cache and a single refetch when {@code kid} is unknown.
+	 * Remote HTTPS JWKS with 10s HTTP timeouts, a 15-minute cache, and a
+	 * single refetch when {@code kid} is unknown.
+	 * <p>
+	 * The returned source is {@link java.io.Closeable} and starts a
+	 * refresh-ahead executor; callers that own it should close it.
 	 */
 	public static JWKSource<SecurityContext> createRemoteJwkSource(URL jwksUrl) {
 		if (jwksUrl == null) {
 			throw new IllegalArgumentException("JWKS URL is required");
 		}
-		return JWKSourceBuilder.create(jwksUrl).retrying(true).build();
+		if (!"https".equalsIgnoreCase(jwksUrl.getProtocol())) {
+			throw new IllegalArgumentException("JWKS URL must be https");
+		}
+		DefaultResourceRetriever retriever = new DefaultResourceRetriever(JWKS_HTTP_TIMEOUT_MS,
+			JWKS_HTTP_TIMEOUT_MS, JWKSourceBuilder.DEFAULT_HTTP_SIZE_LIMIT);
+		return JWKSourceBuilder.create(jwksUrl, retriever)
+				.retrying(true)
+				.cache(JWKS_CACHE_TTL_MS, JWKSourceBuilder.DEFAULT_CACHE_REFRESH_TIMEOUT)
+				.build();
 	}
 
 	public static JWKSource<SecurityContext> createFileJwkSource(File jwksFile)
@@ -144,13 +163,20 @@ public final class OidcIdTokenValidator {
 			throw new OidcIdTokenException("Only compact JWS ID tokens are accepted");
 		}
 
-		SignedJWT signedJwt;
+		JWT jwt;
 		try {
-			signedJwt = SignedJWT.parse(compactIdToken);
+			jwt = JWTParser.parse(compactIdToken);
 		}
 		catch (ParseException e) {
 			throw new OidcIdTokenException("ID token is not a compact JWS", e);
 		}
+		if (jwt instanceof PlainJWT) {
+			throw new OidcIdTokenException("ID token signing algorithm is not allowed");
+		}
+		if (!(jwt instanceof SignedJWT)) {
+			throw new OidcIdTokenException("Only compact JWS ID tokens are accepted");
+		}
+		SignedJWT signedJwt = (SignedJWT) jwt;
 
 		rejectDisallowedHeader(signedJwt.getHeader());
 
@@ -162,6 +188,7 @@ public final class OidcIdTokenValidator {
 			throw new OidcIdTokenException("ID token rejected", e);
 		}
 
+		rejectBlankSubject(claims);
 		rejectStaleOrFutureIat(claims);
 		rejectNonceIfPresent(claims);
 		rejectAccessTokenUse(claims);
@@ -217,6 +244,12 @@ public final class OidcIdTokenValidator {
 		}
 		if (!"JWT".equalsIgnoreCase(value) && !"application/jwt".equalsIgnoreCase(value)) {
 			throw new OidcIdTokenException("ID token typ is not allowed");
+		}
+	}
+
+	private static void rejectBlankSubject(JWTClaimsSet claims) throws OidcIdTokenException {
+		if (isBlank(claims.getSubject())) {
+			throw new OidcIdTokenException("ID token missing sub claim");
 		}
 	}
 
