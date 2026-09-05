@@ -122,17 +122,17 @@ public class OidcDiscoveryClientTest {
 	}
 
 	@Test
-	public void testTokenEndpointAuthMethodsMustIncludeNoneWhenPresent() throws Exception {
+	public void testTokenEndpointAuthMethodsWithoutNoneWarnsAndContinues() throws Exception {
+		// Entra v2.0 discovery lists confidential-client methods and omits none.
 		ProviderMetadata metadata = new ProviderMetadata("https://issuer.example.test",
 			"https://issuer.example.test/device", "https://issuer.example.test/token",
-			"https://issuer.example.test/jwks", List.of("client_secret_basic"), List.of("RS256"));
-		try {
+			"https://issuer.example.test/jwks",
+			List.of("client_secret_post", "private_key_jwt", "client_secret_basic",
+				"self_signed_tls_client_auth"),
+			List.of("RS256"));
+		Set<String> algs =
 			OidcDiscoveryClient.validateDeviceCodeSupport(metadata, Set.of("RS256"));
-			fail("Expected missing none auth method to fail");
-		}
-		catch (IOException e) {
-			assertTrue(e.getMessage(), e.getMessage().contains("none"));
-		}
+		assertTrue(algs.contains("RS256"));
 	}
 
 	@Test

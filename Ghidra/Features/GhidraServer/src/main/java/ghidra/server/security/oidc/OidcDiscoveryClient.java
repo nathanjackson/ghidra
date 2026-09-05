@@ -32,6 +32,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import com.nimbusds.jose.util.JSONObjectUtils;
 
 import ghidra.net.HttpClients;
@@ -40,6 +43,8 @@ import ghidra.net.HttpClients;
  * Fetches and caches OpenID Provider metadata over HTTPS GET.
  */
 public final class OidcDiscoveryClient {
+
+	static final Logger log = LogManager.getLogger(OidcDiscoveryClient.class);
 
 	static final int HTTP_TIMEOUT_SECONDS = 10;
 	static final long CACHE_TTL_MS = 60 * 60 * 1000L;
@@ -101,6 +106,10 @@ public final class OidcDiscoveryClient {
 
 	/**
 	 * Validate that discovery metadata is usable for the device-code grant.
+	 * Missing {@code none} in {@code token_endpoint_auth_methods_supported} is a
+	 * warning, not a startup failure: public device-code clients do not
+	 * authenticate to the token endpoint, and some providers (Entra ID) omit
+	 * {@code none} even for public apps.
 	 *
 	 * @param metadata discovery document
 	 * @param allowedSigningAlgs configured JWS allowlist
@@ -132,9 +141,12 @@ public final class OidcDiscoveryClient {
 		if (metadata.tokenEndpointAuthMethodsSupported != null &&
 			!metadata.tokenEndpointAuthMethodsSupported.isEmpty() &&
 			!containsIgnoreCase(metadata.tokenEndpointAuthMethodsSupported, "none")) {
-			throw new IOException(
-				"OIDC token_endpoint_auth_methods_supported must include none " +
-					"for a public device-code client");
+			// Entra and some other public-client metadata omit none even though
+			// device-code token POSTs are unauthenticated. v1 has no client secret.
+			log.warn(
+				"OIDC token_endpoint_auth_methods_supported does not include none; " +
+					"continuing because device-code public clients do not authenticate " +
+					"to the token endpoint");
 		}
 
 		Set<String> allowed = allowedSigningAlgs == null ? Set.of()

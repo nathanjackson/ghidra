@@ -239,9 +239,10 @@ The Ghidra Server has been designed to support many  possible user authenticatio
   satisfy Ghidra's user-name rules (`[a-zA-Z0-9][a-zA-Z0-9.\-_]*`, maximum 64 characters).
 
   Register a public/native OAuth client with device authorization enabled. The discovery document
-  must advertise `device_authorization_endpoint`, and `token_endpoint_auth_methods_supported` must
-  include `none` when that list is present. Do not put client secrets in `oidc.conf`. SSH
-  authentication (`-ssh`) is not supported with `-a5`. See
+  must advertise `device_authorization_endpoint`. If `token_endpoint_auth_methods_supported` is
+  present but omits `none`, the server logs a warning and continues (Entra ID metadata does this
+  for public clients). Do not put client secrets in `oidc.conf`. SSH authentication (`-ssh`) is
+  not supported with `-a5`. See
   [OIDC Identity Provider Setup](#oidc-identity-provider-setup) for Entra ID, Keycloak, and Okta
   recipes.
 		
@@ -258,29 +259,32 @@ __public/native__ application with __device authorization enabled__. The client 
 Do not configure a client secret. A redirect URI is not required for this v1 device-code flow.
 
 Copy _server/oidc.conf_ and set at least `issuer` and `clientId`. Discovery must advertise
-`device_authorization_endpoint`. When `token_endpoint_auth_methods_supported` is present it must
-include `none`. User names are mapped from ID token claims (by default `preferred_username`, then
-`email`, then `sub`) and are always lowercased; for email addresses the local-part before `@` is
-used.
+`device_authorization_endpoint`. Discovery does not require
+`token_endpoint_auth_methods_supported` to include `none`. User names are mapped from ID token
+claims (by default `preferred_username`, then `email`, then `sub`) and are always lowercased; for
+email addresses the local-part before `@` is used.
 
 ### Microsoft Entra ID
-Register a __Mobile and desktop__ / public client application. Enable __Allow public client flows__
-so the device authorization grant is permitted.
+Register a __Mobile and desktop__ / public client application. Enable __Allow public client flows__.
+Discovery works with `issuer` and `clientId` only. Use the tenant __GUID__ in the issuer URL; do
+not use `common`, `organizations`, or `consumers` (the discovered issuer must match exactly).
 
-* Issuer: `https://login.microsoftonline.com/{tenant}/v2.0`
+* Issuer: `https://login.microsoftonline.com/{tenant-guid}/v2.0`
 * Optional `tenantId` in `oidc.conf` (matched against the ID token `tid` claim)
 * `preferred_username` is the user principal name (UPN)
 
 ### Keycloak
-Create a __public__ client in the realm. Enable __OAuth 2.0 Device Authorization Grant__ on the
-realm. Leave Direct access grants (resource-owner password) off.
+Create a __public__ client. Enable __OAuth 2.0 Device Authorization Grant__ on the client
+(Client → Capability config). Leave Direct access grants (resource-owner password) off. Realm
+Settings → Tokens device-code lifespan and polling interval are optional tuning.
 
 * Issuer is typically `https://<keycloak-host>/realms/<realm>`
 * Discovery must include `device_authorization_endpoint`
 
 ### Okta
-Create a __Native__ application. Enable the device authorization grant on the authorization server
-used by that application.
+Create a __Native__ application and enable the Device Authorization grant on that app. If using a
+custom authorization server, also enable the grant on the access-policy rule. The org
+authorization server needs only the app grant.
 
 * Issuer is the authorization server issuer URL (custom or org authorization server)
 * Discovery must include `device_authorization_endpoint`
