@@ -69,6 +69,7 @@ public class OidcLoginDialogTest extends AbstractGenericTest {
 
 		SystemUtilities.runSwingNow(() -> {
 			assertEquals(USER_CODE, dialog.getUserCodeField().getText());
+			assertEquals(USER_CODE, dialog.getUserCodeField().getSelectedText());
 			assertFalse(dialog.getUserCodeField().isEditable());
 			assertTrue(dialog.getUserCodeField().getFont().getSize() >= 18);
 			assertEquals(VERIFICATION_URI, dialog.getVerificationUriField().getText());
@@ -208,6 +209,22 @@ public class OidcLoginDialogTest extends AbstractGenericTest {
 		assertNull(dialog.getFailure());
 	}
 
+	@Test
+	public void testPollFailureIsSurfaced() throws Exception {
+		flow = new StubFlow(authorization(VERIFICATION_URI_COMPLETE));
+		IOException denied = new IOException("OIDC authorization was denied");
+		flow.failWith = denied;
+		dialog = newDialog(null, uri -> fail("browser should not open"));
+
+		SystemUtilities.runSwingNow(dialog::startAuthorization);
+		dialog.waitForWorker();
+
+		assertSame(denied, dialog.getFailure());
+		assertFalse(dialog.okWasPressed());
+		assertFalse(dialog.anonymousAccessRequested());
+		assertNull(dialog.getIdToken());
+	}
+
 	private OidcLoginDialog newDialog(AnonymousCallback anonymous, OidcLoginDialog.BrowserOpener opener) {
 		return SystemUtilities.runSwingNow(() -> new OidcLoginDialog(newCallback(), anonymous,
 			"server.example.test", flow, opener));
@@ -230,6 +247,7 @@ public class OidcLoginDialogTest extends AbstractGenericTest {
 		private final AtomicInteger completeCalls = new AtomicInteger();
 		private volatile boolean hangUntilCancel;
 		private volatile String token = ID_TOKEN;
+		private volatile IOException failWith;
 
 		StubFlow(DeviceAuthorization auth) {
 			super(HttpClient.newBuilder()
@@ -248,6 +266,9 @@ public class OidcLoginDialogTest extends AbstractGenericTest {
 				listener.deviceAuthorizationStarted(auth);
 			}
 			started.countDown();
+			if (failWith != null) {
+				throw failWith;
+			}
 			if (hangUntilCancel) {
 				while (true) {
 					if (extraCancelled != null && extraCancelled.isCancelled()) {

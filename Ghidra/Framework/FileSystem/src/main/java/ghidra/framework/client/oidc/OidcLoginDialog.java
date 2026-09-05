@@ -251,6 +251,7 @@ public class OidcLoginDialog extends DialogComponentProvider {
 			return;
 		}
 		userCodeField.setText(deviceAuthorization.getUserCode());
+		userCodeField.selectAll();
 		verificationUriField.setText(nullToEmpty(deviceAuthorization.getVerificationUri()));
 		openBrowserButton.setEnabled(browseUri(deviceAuthorization) != null);
 		setStatusText(WAITING_STATUS);
@@ -281,7 +282,7 @@ public class OidcLoginDialog extends DialogComponentProvider {
 			browserOpener.browse(uri);
 			setStatusText(WAITING_STATUS);
 		}
-		catch (IOException e) {
+		catch (Exception e) {
 			// Do not log the URL: verification_uri_complete embeds user_code.
 			Msg.error(this, "Unable to open a browser for OIDC sign-in");
 			setStatusText("Unable to open a browser. Visit the URL shown above.",
@@ -411,7 +412,19 @@ public class OidcLoginDialog extends DialogComponentProvider {
 		if (!Desktop.isDesktopSupported()) {
 			throw new IOException("Desktop browse is not supported");
 		}
-		Desktop.getDesktop().browse(uri);
+		Desktop desktop = Desktop.getDesktop();
+		if (!desktop.isSupported(Desktop.Action.BROWSE)) {
+			throw new IOException("Desktop browse is not supported");
+		}
+		try {
+			desktop.browse(uri);
+		}
+		catch (IOException e) {
+			throw e;
+		}
+		catch (RuntimeException e) {
+			throw new IOException("Desktop browse is not supported", e);
+		}
 	}
 
 	private static boolean isBlank(String value) {
