@@ -52,6 +52,7 @@ public class OidcDeviceCodeFlow {
 	private final HttpClient httpClient;
 	private final TimeSource timeSource;
 	private final AtomicBoolean cancelled = new AtomicBoolean();
+	private volatile Thread workerThread;
 
 	/**
 	 * Construct a flow using a long-lived HTTP client that never follows redirects.
@@ -93,10 +94,15 @@ public class OidcDeviceCodeFlow {
 	}
 
 	/**
-	 * Stop an in-progress poll.
+	 * Stop an in-progress device authorization or poll. Interrupts the worker
+	 * thread so an in-flight HTTP send or sleep does not wait out the request timeout.
 	 */
 	public void cancel() {
 		cancelled.set(true);
+		Thread t = workerThread;
+		if (t != null) {
+			t.interrupt();
+		}
 	}
 
 	/**
@@ -111,7 +117,8 @@ public class OidcDeviceCodeFlow {
 	 */
 	public String complete(OidcAuthenticationCallback oidcCb, DeviceAuthorizationListener listener,
 			Cancelled extraCancelled) throws IOException, CancelledException {
-		DeviceAuthorization authorization = requestDeviceAuthorization(oidcCb);
+		DeviceAuthorization authorization =
+			requestDeviceAuthorization(oidcCb, extraCancelled);
 		if (listener != null) {
 			listener.deviceAuthorizationStarted(authorization);
 		}
@@ -124,9 +131,15 @@ public class OidcDeviceCodeFlow {
 	 * @param oidcCb OIDC callback with provider metadata
 	 * @return device authorization details
 	 * @throws IOException if the request fails or the response is invalid
+	 * @throws CancelledException if the request is cancelled
 	 */
 	public DeviceAuthorization requestDeviceAuthorization(OidcAuthenticationCallback oidcCb)
-			throws IOException {
+			throws IOException, CancelledException {
+		return requestDeviceAuthorization(oidcCb, null);
+	}
+
+	DeviceAuthorization requestDeviceAuthorization(OidcAuthenticationCallback oidcCb,
+			Cancelled extraCancelled) throws IOException, CancelledException {
 		if (oidcCb == null) {
 			throw new IllegalArgumentException("oidcCb is required");
 		}
@@ -153,7 +166,8 @@ public class OidcDeviceCodeFlow {
 			appendForm(form, "nonce", oidcCb.getNonce());
 		}
 
-		JsonObject json = postForm(uri, form.toString(), "OIDC device authorization");
+		JsonObject json =
+			postForm(uri, form.toString(), "OIDC device authorization", extraCancelled);
 		String deviceCode = jsonString(json, "device_code");
 		String userCode = jsonString(json, "user_code");
 		String verificationUri = jsonString(json, "verification_uri");
@@ -229,7 +243,7 @@ public class OidcDeviceCodeFlow {
 				throw new IOException("OIDC authorization timed out");
 			}
 
-			TokenPollResult result = pollOnce(uri, body);
+			TokenPollResult result = pollOnce(uri, body, extraCancelled);
 			if (result.idToken != null) {
 				return result.idToken;
 			}
@@ -263,8 +277,9 @@ public class OidcDeviceCodeFlow {
 		return buf.toString();
 	}
 
-	private TokenPollResult pollOnce(URI uri, String form) throws IOException, CancelledException {
-		HttpResponse<String> response = sendForm(uri, form, "OIDC token");
+	private TokenPollResult pollOnce(URI uri, String form, Cancelled extraCancelled)
+			throws IOException, CancelledException {
+		HttpResponse<String> response = sendForm(uri, form, "OIDC token", extraCancelled);
 		int status = response.statusCode();
 		JsonObject json = parseJsonObject(response.body(), "OIDC token");
 
@@ -299,14 +314,9 @@ public class OidcDeviceCodeFlow {
 		return TokenPollResult.fail("OIDC token request failed: HTTP " + status);
 	}
 
-	private JsonObject postForm(URI uri, String form, String what) throws IOException {
-		HttpResponse<String> response;
-		try {
-			response = sendForm(uri, form, what);
-		}
-		catch (CancelledException e) {
-			throw new IOException(e.getMessage(), e);
-		}
+	private JsonObject postForm(URI uri, String form, String what, Cancelled extraCancelled)
+			throws IOException, CancelledException {
+		HttpResponse<String> response = sendForm(uri, form, what, extraCancelled);
 		int status = response.statusCode();
 		JsonObject json = parseJsonObject(response.body(), what);
 		if (status >= 200 && status < 300) {
@@ -317,15 +327,18 @@ public class OidcDeviceCodeFlow {
 		throw new IOException(formatOauthError(error, description, status));
 	}
 
-	private HttpResponse<String> sendForm(URI uri, String form, String what)
-			throws IOException, CancelledException {
+	private HttpResponse<String> sendForm(URI uri, String form, String what,
+			Cancelled extraCancelled) throws IOException, CancelledException {
 		HttpRequest request = HttpRequest.newBuilder(uri)
 				.timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
 				.header("Content-Type", "application/x-www-form-urlencoded")
 				.header("Accept", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
 				.build();
+		Thread previous = workerThread;
+		workerThread = Thread.currentThread();
 		try {
+			checkCancelled(extraCancelled);
 			return httpClient.send(request, BodyHandlers.ofString(StandardCharsets.UTF_8));
 		}
 		catch (InterruptedException e) {
@@ -333,7 +346,11 @@ public class OidcDeviceCodeFlow {
 			throw new CancelledException("OIDC authorization cancelled");
 		}
 		catch (IOException e) {
+			checkCancelled(extraCancelled);
 			throw new IOException(what + " request failed", e);
+		}
+		finally {
+			workerThread = previous;
 		}
 	}
 
@@ -358,12 +375,17 @@ public class OidcDeviceCodeFlow {
 			if (slice <= 0) {
 				return;
 			}
+			Thread previous = workerThread;
+			workerThread = Thread.currentThread();
 			try {
 				timeSource.sleep(Math.min(slice, 200));
 			}
 			catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
 				throw new CancelledException("OIDC authorization cancelled");
+			}
+			finally {
+				workerThread = previous;
 			}
 		}
 	}

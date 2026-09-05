@@ -182,10 +182,18 @@ public class DefaultClientAuthenticator extends PopupKeyStorePasswordProvider
 		}
 		try {
 			OidcDeviceCodeFlow flow = new OidcDeviceCodeFlow();
-			String idToken = flow.complete(oidcCb, authorization -> {
-				Msg.showInfo(this, null, "Ghidra Server OIDC Sign-In",
-					OidcDeviceCodeFlow.formatSignInMessage(authorization));
-			}, () -> Thread.currentThread().isInterrupted());
+			OidcDeviceCodeFlow.DeviceAuthorization authorization =
+				flow.requestDeviceAuthorization(oidcCb);
+			String message = OidcDeviceCodeFlow.formatSignInMessage(authorization);
+			// stderr so user_code is visible without logging at INFO (PR 5 owns the dialog)
+			System.err.println(message);
+			int choice = OptionDialog.showOptionDialog(null, "Ghidra Server OIDC Sign-In",
+				message, "Continue", OptionDialog.INFORMATION_MESSAGE);
+			if (choice != OptionDialog.OPTION_ONE) {
+				return false;
+			}
+			String idToken = flow.pollForIdToken(oidcCb, authorization,
+				() -> Thread.currentThread().isInterrupted());
 			oidcCb.setIdToken(idToken);
 			return true;
 		}

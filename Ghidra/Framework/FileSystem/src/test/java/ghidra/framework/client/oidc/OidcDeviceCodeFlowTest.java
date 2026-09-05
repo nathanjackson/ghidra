@@ -342,6 +342,48 @@ public class OidcDeviceCodeFlowTest {
 	}
 
 	@Test
+	public void testCancelDuringDeviceAuthorizationIsCancelledException() throws Exception {
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/device", exchange -> {
+			exchange.getRequestBody().readAllBytes();
+			entered.countDown();
+			try {
+				release.await(5, TimeUnit.SECONDS);
+			}
+			catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+			exchange.sendResponseHeaders(500, -1);
+			exchange.close();
+		});
+		server.start();
+
+		OidcDeviceCodeFlow flow = new OidcDeviceCodeFlow(plainHttpClient());
+		AtomicReference<Exception> error = new AtomicReference<>();
+		Thread thread = new Thread(() -> {
+			try {
+				flow.requestDeviceAuthorization(newCallback());
+				fail("Expected cancellation");
+			}
+			catch (CancelledException e) {
+				// expected — not wrapped as IOException
+			}
+			catch (Exception e) {
+				error.set(e);
+			}
+		});
+		thread.start();
+		assertTrue("device authorization did not start", entered.await(5, TimeUnit.SECONDS));
+		flow.cancel();
+		thread.join(3000);
+		release.countDown();
+		assertFalse("device authorization did not stop after cancel", thread.isAlive());
+		assertNull(error.get() == null ? null : error.get().toString(), error.get());
+	}
+
+	@Test
 	public void testNonLoopbackHttpRejected() throws Exception {
 		OidcAuthenticationCallback cb = new OidcAuthenticationCallback("https://idp.example.test",
 			CLIENT_ID, "http://example.test/device", "http://example.test/token", SCOPES, NONCE,
