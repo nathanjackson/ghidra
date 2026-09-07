@@ -18,10 +18,12 @@ package ghidra.framework.remote;
 import static org.junit.Assert.*;
 
 import java.io.*;
+import java.util.Arrays;
 
 import org.junit.Test;
 
 import generic.test.AbstractGenericTest;
+import ghidra.util.NumericUtilities;
 
 public class FidoAuthenticationCallbackTest extends AbstractGenericTest {
 
@@ -115,24 +117,20 @@ public class FidoAuthenticationCallbackTest extends AbstractGenericTest {
 		cb.setAttestationObject(ATTESTATION);
 
 		String text = cb.toString();
-		assertTrue(text.contains(RP_ID));
-		assertTrue(text.contains(RP_NAME));
-		assertTrue(text.contains("enroll=false"));
-		assertTrue(text.contains("timeoutSeconds=60"));
-		assertTrue(text.contains("allowCredentials=2"));
+		assertEquals("FidoAuthenticationCallback[rpId=" + RP_ID + ", rpName=" + RP_NAME +
+			", enroll=false, timeoutSeconds=60, allowCredentials=2]", text);
 
-		assertFalse(text.contains("challenge"));
 		assertFalse(text.contains(ENROLL_TOKEN));
-		assertFalse(text.contains("one-time"));
-		assertFalse(text.contains("authenticatorData"));
-		assertFalse(text.contains("clientDataJSON"));
-		assertFalse(text.contains("attestationObject"));
-		assertFalse(text.contains("signature"));
-		assertFalse(text.contains(new String(CHALLENGE)));
-		assertFalse(text.contains(new String(SIGNATURE)));
-		assertFalse(text.contains(new String(AUTH_DATA)));
-		assertFalse(text.contains(new String(CLIENT_DATA)));
-		assertFalse(text.contains(new String(ATTESTATION)));
+		assertFalse(text.contains(Arrays.toString(CHALLENGE)));
+		assertFalse(text.contains(Arrays.toString(SIGNATURE)));
+		assertFalse(text.contains(Arrays.toString(AUTH_DATA)));
+		assertFalse(text.contains(Arrays.toString(CLIENT_DATA)));
+		assertFalse(text.contains(Arrays.toString(ATTESTATION)));
+		assertFalse(text.contains(NumericUtilities.convertBytesToString(CHALLENGE)));
+		assertFalse(text.contains(NumericUtilities.convertBytesToString(SIGNATURE)));
+		assertFalse(text.contains(NumericUtilities.convertBytesToString(AUTH_DATA)));
+		assertFalse(text.contains(NumericUtilities.convertBytesToString(CLIENT_DATA)));
+		assertFalse(text.contains(NumericUtilities.convertBytesToString(ATTESTATION)));
 	}
 
 	@Test

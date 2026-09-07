@@ -23,9 +23,9 @@ import javax.security.auth.callback.Callback;
 /**
  * <code>FidoAuthenticationCallback</code> provides a Callback implementation used
  * to perform FIDO2/WebAuthn authentication.  This callback is instantiated
- * by the server with relying-party identity, a random challenge, and either
- * an allow-list of credential ids (assertion/login) or an enroll request
- * (makeCredential).
+ * by the server with relying-party identity, a random challenge, an optional
+ * allow-list of credential ids, and an {@link #isEnroll() enroll} flag that
+ * selects makeCredential versus assertion.
  * <p>
  * It is the responsibility of the callback handler to invoke
  * {@link #setAssertion(byte[], byte[], byte[], byte[])} and, when enrolling,
@@ -56,14 +56,15 @@ public class FidoAuthenticationCallback implements Callback, Serializable {
 
 	/**
 	 * Construct callback with FIDO2 relying-party parameters and a random challenge.
-	 * A null or empty {@code allowCredentials} list indicates enrollment
-	 * ({@code makeCredential}); otherwise the client should produce an assertion
-	 * for one of the listed credential ids.
+	 * {@link #isEnroll()} is the sole discriminator between enrollment
+	 * ({@code makeCredential}) and assertion (login).  {@code allowCredentials}
+	 * lists credential ids the client may assert; it is typically null or empty
+	 * when enrolling, but emptiness does not imply enrollment.
 	 * @param rpId WebAuthn relying-party id (stable hostname)
 	 * @param rpName relying-party display name; may be null
 	 * @param challenge random bytes to be signed (32 or more)
-	 * @param allowCredentials credential ids allowed for assertion; null or empty
-	 *        means enroll
+	 * @param allowCredentials credential ids for assertion; typically null or empty
+	 *        when enrolling
 	 * @param enroll true to register a new credential; false to assert
 	 * @param timeoutSeconds client time budget in seconds
 	 */

@@ -121,8 +121,7 @@ public class GhidraObjectInputFilter implements ObjectInputFilter {
 		return logger;
 	}
 
-	private void initializeFilter(List<ResourceFile> filterFiles,
-			Supplier<String> sourceNameSupplier)
+	void initializeFilter(List<ResourceFile> filterFiles, Supplier<String> sourceNameSupplier)
 			throws IllegalStateException {
 
 		if (TRACKER_ENABLED) {
@@ -196,7 +195,7 @@ public class GhidraObjectInputFilter implements ObjectInputFilter {
 		Class<?> clazz = info.serialClass();
 		if (clazz != null) {
 
-			// Allow all primitive arrays (including multi-dimensional, e.g. byte[][])
+			// Allow 1-D primitive arrays, plus byte[][] for FidoAuthenticationCallback
 			if (clazz.isArray()) {
 
 				if (info.arrayLength() > maxArray) {
@@ -204,11 +203,11 @@ public class GhidraObjectInputFilter implements ObjectInputFilter {
 				}
 
 				Class<?> componentType = clazz.getComponentType();
-				while (componentType != null && componentType.isArray()) {
-					componentType = componentType.getComponentType();
-				}
 				if (componentType != null && componentType.isPrimitive()) {
-					return Status.ALLOWED; // allow all primitive arrays
+					return Status.ALLOWED; // allow 1-D primitive arrays
+				}
+				if (clazz == byte[][].class) {
+					return Status.ALLOWED;
 				}
 			}
 
