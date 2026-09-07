@@ -16,6 +16,7 @@
 package ghidra.framework.client.fido;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.security.auth.callback.NameCallback;
@@ -46,6 +47,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 	private final boolean allowUserNameEntry;
 
 	private JTextField nameField;
+	private JPasswordField pinField;
 	private JTextField enrollTokenField;
 
 	private final AtomicBoolean cancelled = new AtomicBoolean();
@@ -93,7 +95,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 			setFocusComponent(nameField);
 		}
 		else {
-			setFocusComponent(enrollTokenField);
+			setFocusComponent(pinField);
 		}
 		if (!StringUtils.isBlank(loginError)) {
 			setStatusText(loginError, MessageType.ERROR);
@@ -123,6 +125,13 @@ public class FidoLoginDialog extends DialogComponentProvider {
 			nameLabel.getAccessibleContext().setAccessibleName("User ID");
 			workPanel.add(nameLabel);
 		}
+
+		workPanel.add(new GLabel("Key PIN:"));
+		pinField = new JPasswordField(16);
+		pinField.setName("FIDO-PIN");
+		pinField.getAccessibleContext().setAccessibleName("Security key PIN");
+		pinField.setToolTipText("PIN for the security key. Leave blank if the key has no PIN.");
+		workPanel.add(pinField);
 
 		workPanel.add(new GLabel("Enroll token:"));
 		enrollTokenField = new JTextField(16);
@@ -161,20 +170,22 @@ public class FidoLoginDialog extends DialogComponentProvider {
 			return;
 		}
 		String enrollToken = currentEnrollToken();
+		char[] pin = pinField.getPassword();
 		setOkEnabled(false);
 		if (nameField != null) {
 			nameField.setEnabled(false);
 		}
+		pinField.setEnabled(false);
 		enrollTokenField.setEnabled(false);
 		setStatusText(TOUCH_STATUS);
 		helperRunning.set(true);
-		Thread t = new Thread(() -> runHelper(userName, enrollToken), "FIDO Helper");
+		Thread t = new Thread(() -> runHelper(userName, enrollToken, pin), "FIDO Helper");
 		t.setDaemon(true);
 		workerThread = t;
 		t.start();
 	}
 
-	private void runHelper(String userName, String enrollToken) {
+	private void runHelper(String userName, String enrollToken, char[] pin) {
 		try {
 			if (cancelled.get()) {
 				Swing.runNow(this::finishCancelled);
@@ -185,7 +196,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 				Swing.runNow(this::finishCancelled);
 				return;
 			}
-			authenticator.complete(fidoCb, userName, enrollToken, allow);
+			authenticator.complete(fidoCb, userName, enrollToken, allow, pin);
 			if (nameCb != null) {
 				nameCb.setName(userName);
 			}
@@ -197,6 +208,11 @@ public class FidoLoginDialog extends DialogComponentProvider {
 				return;
 			}
 			Swing.runNow(() -> finishHelperError(e));
+		}
+		finally {
+			if (pin != null) {
+				Arrays.fill(pin, '\0');
+			}
 		}
 	}
 
@@ -217,6 +233,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 		}
 		okPressed = true;
 		helperRunning.set(false);
+		clearPinField();
 		close();
 	}
 
@@ -225,6 +242,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 			return;
 		}
 		helperRunning.set(false);
+		clearPinField();
 		close();
 	}
 
@@ -240,7 +258,14 @@ public class FidoLoginDialog extends DialogComponentProvider {
 		if (nameField != null) {
 			nameField.setEnabled(true);
 		}
+		pinField.setEnabled(true);
 		enrollTokenField.setEnabled(true);
+	}
+
+	private void clearPinField() {
+		if (pinField != null) {
+			pinField.setText("");
+		}
 	}
 
 	@Override
@@ -269,6 +294,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 	public void dispose() {
 		cancelled.set(true);
 		authenticator.cancel();
+		clearPinField();
 		super.dispose();
 	}
 
@@ -288,6 +314,10 @@ public class FidoLoginDialog extends DialogComponentProvider {
 
 	JTextField getNameField() {
 		return nameField;
+	}
+
+	JPasswordField getPinField() {
+		return pinField;
 	}
 
 	JTextField getEnrollTokenField() {

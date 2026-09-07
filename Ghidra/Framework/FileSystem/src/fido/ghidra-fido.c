@@ -36,10 +36,13 @@ int main(void) {
 	}
 	fido_request req;
 	if (fido_parse_request(json, &req) != 0) {
+		fido_wipe(json, json_len);
 		free(json);
+		fido_free_request(&req);
 		fido_write_error("invalid request JSON");
 		return 1;
 	}
+	fido_wipe(json, json_len);
 	free(json);
 
 	if (!req.op || !req.rp_id || !req.challenge) {

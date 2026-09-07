@@ -220,24 +220,37 @@ static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 			goto done;
 		}
 	}
+	const char *json_pin = (req->pin && req->pin[0]) ? req->pin : NULL;
 	char *pin = NULL;
-	if (fido_dev_has_pin(dev)) {
+	int pin_owned = 0;
+	if (json_pin) {
+		pin = (char *)json_pin;
+	}
+	else if (fido_dev_has_pin(dev)) {
 		pin = read_pin_tty();
+		pin_owned = 1;
 		if (!pin) {
 			set_err(err, errlen, "security key PIN required");
 			goto done;
 		}
 	}
 	int r = fido_dev_get_assert(dev, assert, pin);
-	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && pin == NULL) {
+	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && !json_pin) {
+		if (pin_owned) {
+			wipe_pin(pin);
+			pin_owned = 0;
+		}
 		pin = read_pin_tty();
+		pin_owned = 1;
 		if (!pin) {
 			set_err(err, errlen, "security key PIN required");
 			goto done;
 		}
 		r = fido_dev_get_assert(dev, assert, pin);
 	}
-	wipe_pin(pin);
+	if (pin_owned) {
+		wipe_pin(pin);
+	}
 	pin = NULL;
 	if (r != FIDO_OK) {
 		set_fido_err(err, errlen, r);
@@ -302,24 +315,37 @@ static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 	}
 	/* Prefer none so the authenticator does not attach packed+x5c. */
 	(void) fido_cred_set_fmt(cred, "none");
+	const char *json_pin = (req->pin && req->pin[0]) ? req->pin : NULL;
 	char *pin = NULL;
-	if (fido_dev_has_pin(dev)) {
+	int pin_owned = 0;
+	if (json_pin) {
+		pin = (char *)json_pin;
+	}
+	else if (fido_dev_has_pin(dev)) {
 		pin = read_pin_tty();
+		pin_owned = 1;
 		if (!pin) {
 			set_err(err, errlen, "security key PIN required");
 			goto done;
 		}
 	}
 	int r = fido_dev_make_cred(dev, cred, pin);
-	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && pin == NULL) {
+	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && !json_pin) {
+		if (pin_owned) {
+			wipe_pin(pin);
+			pin_owned = 0;
+		}
 		pin = read_pin_tty();
+		pin_owned = 1;
 		if (!pin) {
 			set_err(err, errlen, "security key PIN required");
 			goto done;
 		}
 		r = fido_dev_make_cred(dev, cred, pin);
 	}
-	wipe_pin(pin);
+	if (pin_owned) {
+		wipe_pin(pin);
+	}
 	pin = NULL;
 	if (r != FIDO_OK) {
 		set_fido_err(err, errlen, r);

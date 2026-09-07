@@ -81,6 +81,30 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 		assertEquals(1, allow.size());
 		assertEquals(FidoAuthenticator.encodeBase64Url(CRED_ID), allow.get(0).getAsString());
 		assertFalse(seen.get().contains(ENROLL_TOKEN));
+		assertFalse(req.has("pin"));
+	}
+
+	@Test
+	public void testPinIsSentInRequestJsonAndOmittedFromErrors() throws Exception {
+		String pin = "s3cret-pin-xyz";
+		AtomicReference<String> seen = new AtomicReference<>();
+		FidoAuthenticator auth = new FidoAuthenticator((json, timeoutMs) -> {
+			seen.set(json);
+			JsonObject obj = new JsonObject();
+			obj.addProperty("error", "touch timeout");
+			return obj.toString();
+		});
+		try {
+			auth.complete(newCallback(false), "alice", null, new byte[][] { CRED_ID },
+				pin.toCharArray());
+			fail("expected IOException");
+		}
+		catch (IOException e) {
+			assertEquals("touch timeout", e.getMessage());
+			assertFalse(e.getMessage().contains(pin));
+		}
+		JsonObject req = JsonParser.parseString(seen.get()).getAsJsonObject();
+		assertEquals(pin, req.get("pin").getAsString());
 	}
 
 	@Test

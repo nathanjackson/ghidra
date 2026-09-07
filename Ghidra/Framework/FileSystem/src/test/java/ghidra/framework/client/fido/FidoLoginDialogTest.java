@@ -28,6 +28,9 @@ import javax.security.auth.callback.NameCallback;
 import org.junit.After;
 import org.junit.Test;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 import generic.test.AbstractGenericTest;
 import ghidra.framework.remote.FidoAuthenticationCallback;
 import ghidra.util.SystemUtilities;
@@ -67,6 +70,7 @@ public class FidoLoginDialogTest extends AbstractGenericTest {
 		SystemUtilities.runSwingNow(() -> {
 			assertEquals("alice", dialog.getNameField().getText());
 			assertEquals("", dialog.getEnrollTokenField().getText());
+			assertEquals(0, dialog.getPinField().getPassword().length);
 			dialog.okCallback();
 		});
 		dialog.waitForWorker();
@@ -99,6 +103,27 @@ public class FidoLoginDialogTest extends AbstractGenericTest {
 		assertEquals("create", helper.lastOp.get());
 		assertEquals("enroll-token", fidoCb.getEnrollToken());
 		assertArrayEquals(ATTESTATION, fidoCb.getAttestationObject());
+	}
+
+	@Test
+	public void testPinIsPassedToHelperAndCleared() throws Exception {
+		String pin = "s3cret-pin-xyz";
+		StubHelper helper = new StubHelper(false);
+		NameCallback nameCb = new NameCallback("User ID:");
+		nameCb.setName("alice");
+		dialog = newDialog(nameCb, newCallback(), helper, null);
+
+		SystemUtilities.runSwingNow(() -> {
+			dialog.getPinField().setText(pin);
+			dialog.okCallback();
+		});
+		dialog.waitForWorker();
+
+		assertTrue(dialog.okWasPressed());
+		assertEquals(pin, helper.lastPin.get());
+		assertFalse(helper.lastJson.get().contains("\"error\""));
+		SystemUtilities.runSwingNow(
+			() -> assertEquals(0, dialog.getPinField().getPassword().length));
 	}
 
 	@Test
@@ -155,6 +180,8 @@ public class FidoLoginDialogTest extends AbstractGenericTest {
 		private final CountDownLatch started = new CountDownLatch(1);
 		private final AtomicInteger calls = new AtomicInteger();
 		private final AtomicReference<String> lastOp = new AtomicReference<>();
+		private final AtomicReference<String> lastPin = new AtomicReference<>();
+		private final AtomicReference<String> lastJson = new AtomicReference<>();
 		volatile boolean hangUntilCancel;
 
 		StubHelper(boolean create) {
@@ -164,6 +191,11 @@ public class FidoLoginDialogTest extends AbstractGenericTest {
 		@Override
 		public String execute(String requestJson, int timeoutMs) throws IOException {
 			calls.incrementAndGet();
+			lastJson.set(requestJson);
+			JsonObject req = JsonParser.parseString(requestJson).getAsJsonObject();
+			if (req.has("pin") && !req.get("pin").isJsonNull()) {
+				lastPin.set(req.get("pin").getAsString());
+			}
 			if (requestJson.contains("\"op\":\"create\"")) {
 				lastOp.set("create");
 			}

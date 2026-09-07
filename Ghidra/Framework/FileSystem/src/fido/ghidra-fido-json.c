@@ -402,6 +402,12 @@ int fido_parse_request(const char *json, fido_request *req) {
 				return -1;
 			}
 		}
+		else if (strcmp(key, "pin") == 0) {
+			if (parse_string(&p, &req->pin) != 0) {
+				free(key);
+				return -1;
+			}
+		}
 		else {
 			if (skip_value(&p) != 0) {
 				free(key);
@@ -422,6 +428,16 @@ int fido_parse_request(const char *json, fido_request *req) {
 	return -1;
 }
 
+void fido_wipe(void *p, size_t n) {
+	volatile unsigned char *v = (volatile unsigned char *)p;
+	if (!v) {
+		return;
+	}
+	while (n--) {
+		*v++ = 0;
+	}
+}
+
 void fido_free_request(fido_request *req) {
 	if (!req) {
 		return;
@@ -435,6 +451,10 @@ void fido_free_request(fido_request *req) {
 	free(req->user_id);
 	free(req->user_verification);
 	free(req->attachment);
+	if (req->pin) {
+		fido_wipe(req->pin, strlen(req->pin));
+		free(req->pin);
+	}
 	for (int i = 0; i < req->allow_count; i++) {
 		free(req->allow[i]);
 	}

@@ -90,6 +90,15 @@ public class FidoAuthenticator {
 	 */
 	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
 			byte[][] allowCredentials) throws IOException {
+		complete(fidoCb, userName, enrollToken, allowCredentials, null);
+	}
+
+	/**
+	 * Run assert or create and store the result on {@code fidoCb}.
+	 * @param pin security-key PIN for libfido2; may be null or empty. Not logged.
+	 */
+	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
+			byte[][] allowCredentials, char[] pin) throws IOException {
 		if (fidoCb == null) {
 			throw new IllegalArgumentException("fidoCb is required");
 		}
@@ -99,13 +108,13 @@ public class FidoAuthenticator {
 		boolean create = !StringUtils.isBlank(enrollToken);
 		int timeoutMs = timeoutMs(fidoCb.getTimeoutSeconds());
 		String request = encodeRequest(create ? OP_CREATE : OP_ASSERT, fidoCb, userName,
-			allowCredentials, timeoutMs);
+			allowCredentials, timeoutMs, pin);
 		try {
 			String responseJson = helper.execute(request, timeoutMs);
 			applyResponse(fidoCb, responseJson, create, enrollToken);
 		}
 		catch (IOException e) {
-			throw sanitize(e);
+			throw sanitize(e, pin);
 		}
 	}
 
@@ -125,6 +134,11 @@ public class FidoAuthenticator {
 
 	static String encodeRequest(String op, FidoAuthenticationCallback fidoCb, String userName,
 			byte[][] allowCredentials, int timeoutMs) {
+		return encodeRequest(op, fidoCb, userName, allowCredentials, timeoutMs, null);
+	}
+
+	static String encodeRequest(String op, FidoAuthenticationCallback fidoCb, String userName,
+			byte[][] allowCredentials, int timeoutMs, char[] pin) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("op", op);
 		obj.addProperty("rpId", fidoCb.getRpId());
@@ -148,6 +162,9 @@ public class FidoAuthenticator {
 		obj.addProperty("residentKey", Boolean.FALSE);
 		obj.addProperty("userVerification", UV_REQUIRED);
 		obj.addProperty("authenticatorAttachment", ATTACHMENT_CROSS_PLATFORM);
+		if (pin != null && pin.length > 0) {
+			obj.addProperty("pin", new String(pin));
+		}
 		return obj.toString();
 	}
 
@@ -278,16 +295,23 @@ public class FidoAuthenticator {
 		return decoded;
 	}
 
-	private static IOException sanitize(IOException e) {
-		String msg = safeHelperError(e.getMessage());
+	private static IOException sanitize(IOException e, char[] pin) {
+		String msg = safeHelperError(e.getMessage(), pin);
 		return new IOException(msg);
 	}
 
 	static String safeHelperError(String msg) {
+		return safeHelperError(msg, null);
+	}
+
+	static String safeHelperError(String msg, char[] pin) {
 		if (msg == null || msg.isBlank()) {
 			return "FIDO helper failed";
 		}
 		String trimmed = msg.trim();
+		if (pin != null && pin.length > 0 && trimmed.contains(new String(pin))) {
+			return "FIDO helper failed";
+		}
 		if (trimmed.length() > MAX_HELPER_ERROR_CHARS || trimmed.indexOf('{') >= 0) {
 			return "FIDO helper failed";
 		}

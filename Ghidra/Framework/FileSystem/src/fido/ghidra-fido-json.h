@@ -40,6 +40,7 @@ typedef struct {
 	int resident_key;
 	char *user_verification;
 	char *attachment;
+	char *pin;
 } fido_request;
 
 typedef struct {
@@ -65,6 +66,7 @@ char *fido_build_client_data_json(const char *type, const char *challenge_b64,
 	const char *origin);
 char *fido_b64url_encode(const uint8_t *data, size_t len);
 int fido_b64url_decode(const char *s, uint8_t **out, size_t *out_len);
+void fido_wipe(void *p, size_t n);
 
 int fido_platform_assert(const fido_request *req, fido_response *resp, char *err,
 	size_t errlen);
