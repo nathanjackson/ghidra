@@ -5,6 +5,7 @@ ghidra.framework.remote.GhidraPrincipal;
 ghidra.framework.remote.AnonymousCallback;
 ghidra.framework.remote.SSHSignatureCallback;
 ghidra.framework.remote.SignatureCallback;
+ghidra.framework.remote.FidoAuthenticationCallback;
 ghidra.framework.remote.User;
 [Lghidra.framework.remote.User;
 ghidra.framework.store.CheckoutType;

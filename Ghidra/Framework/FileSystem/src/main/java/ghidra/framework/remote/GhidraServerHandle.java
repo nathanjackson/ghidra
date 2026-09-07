@@ -56,13 +56,16 @@ public interface GhidraServerHandle extends Remote {
 	 *       exceptions reduced to be compliant with client-side filters.  Server still
 	 *       supports older clients back to interface version 11.  Server may now BIND
 	 *       to the RMI registery with two different names if needed.
+	 *   14: Added FidoAuthenticationCallback for FIDO2 (rpId, challenge, allowCredentials,
+	 *       enroll, assertion/attestation).  Server still supports older clients back to
+	 *       interface version 11.
 	 */
 
 	/**
 	 * The server interface version that the server implements.  This corresponds to the maximum 
 	 * supported client interface version.
 	 */
-	public static final int SERVER_INTERFACE_VERSION = 13;
+	public static final int SERVER_INTERFACE_VERSION = 14;
 
 	/**
 	 * The minimum server interface version that the client can operate with.

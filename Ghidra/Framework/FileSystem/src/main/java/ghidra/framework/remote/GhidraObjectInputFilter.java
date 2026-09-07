@@ -196,7 +196,7 @@ public class GhidraObjectInputFilter implements ObjectInputFilter {
 		Class<?> clazz = info.serialClass();
 		if (clazz != null) {
 
-			// Allow all primitive arrays
+			// Allow all primitive arrays (including multi-dimensional, e.g. byte[][])
 			if (clazz.isArray()) {
 
 				if (info.arrayLength() > maxArray) {
@@ -204,6 +204,9 @@ public class GhidraObjectInputFilter implements ObjectInputFilter {
 				}
 
 				Class<?> componentType = clazz.getComponentType();
+				while (componentType != null && componentType.isArray()) {
+					componentType = componentType.getComponentType();
+				}
 				if (componentType != null && componentType.isPrimitive()) {
 					return Status.ALLOWED; // allow all primitive arrays
 				}
