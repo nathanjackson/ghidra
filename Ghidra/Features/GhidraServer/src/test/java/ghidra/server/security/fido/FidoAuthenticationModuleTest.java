@@ -255,6 +255,18 @@ public class FidoAuthenticationModuleTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testAllowCredentialsLookupDoesNotConsumeChallenge() throws Exception {
+		storeCredential(0);
+		Callback[] callbacks = module.getAuthenticationCallbacks();
+		fillName(callbacks, USER);
+		byte[][] ids = module.getAllowCredentials(userMgr(), USER, fido(callbacks).getChallenge());
+		assertEquals(1, ids.length);
+		assertArrayEquals(credId, ids[0]);
+		fillAssertion(callbacks, 1);
+		assertEquals(USER, module.authenticate(userMgr(), subject(USER), callbacks));
+	}
+
+	@Test
 	public void testGetAllowCredentialsEmptyWithoutLiveChallenge() throws Exception {
 		storeCredential(0);
 		assertEquals(0, module.getAllowCredentials(userMgr(), USER, null).length);
