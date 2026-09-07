@@ -611,6 +611,9 @@ int fido_b64url_decode(const char *s, uint8_t **out, size_t *out_len) {
 	while (n > 0 && s[n - 1] == '=') {
 		n--;
 	}
+	if (n > (FIDO_MAX_BLOB * 4) / 3 + 8) {
+		return -1;
+	}
 	size_t cap = (n * 3) / 4 + 2;
 	uint8_t *buf = (uint8_t *)malloc(cap);
 	if (!buf) {
@@ -631,6 +634,10 @@ int fido_b64url_decode(const char *s, uint8_t **out, size_t *out_len) {
 			bits -= 8;
 			buf[o++] = (uint8_t)((val >> bits) & 0xff);
 		}
+	}
+	if (o > FIDO_MAX_BLOB) {
+		free(buf);
+		return -1;
 	}
 	*out = buf;
 	*out_len = o;

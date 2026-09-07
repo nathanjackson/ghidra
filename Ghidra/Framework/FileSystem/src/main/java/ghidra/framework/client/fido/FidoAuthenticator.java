@@ -51,7 +51,7 @@ public class FidoAuthenticator {
 	private static final int DEFAULT_TIMEOUT_MS = 60_000;
 	private static final int MIN_TIMEOUT_MS = 5_000;
 	private static final int MAX_TIMEOUT_MS = 300_000;
-	private static final int STDERR_LIMIT = 2048;
+	private static final int MAX_HELPER_ERROR_CHARS = 256;
 
 	private final FidoHelper helper;
 
@@ -100,14 +100,13 @@ public class FidoAuthenticator {
 		int timeoutMs = timeoutMs(fidoCb.getTimeoutSeconds());
 		String request = encodeRequest(create ? OP_CREATE : OP_ASSERT, fidoCb, userName,
 			allowCredentials, timeoutMs);
-		String responseJson;
 		try {
-			responseJson = helper.execute(request, timeoutMs);
+			String responseJson = helper.execute(request, timeoutMs);
+			applyResponse(fidoCb, responseJson, create, enrollToken);
 		}
 		catch (IOException e) {
 			throw sanitize(e);
 		}
-		applyResponse(fidoCb, responseJson, create, enrollToken);
 	}
 
 	static int timeoutMs(int timeoutSeconds) {
@@ -280,11 +279,19 @@ public class FidoAuthenticator {
 	}
 
 	private static IOException sanitize(IOException e) {
-		String msg = e.getMessage();
+		String msg = safeHelperError(e.getMessage());
+		return new IOException(msg);
+	}
+
+	static String safeHelperError(String msg) {
 		if (msg == null || msg.isBlank()) {
-			return new IOException("FIDO helper failed");
+			return "FIDO helper failed";
 		}
-		return e;
+		String trimmed = msg.trim();
+		if (trimmed.length() > MAX_HELPER_ERROR_CHARS || trimmed.indexOf('{') >= 0) {
+			return "FIDO helper failed";
+		}
+		return trimmed;
 	}
 
 	/**
@@ -347,7 +354,7 @@ public class FidoAuthenticator {
 					throw stdout.ioError;
 				}
 				int exit = p.exitValue();
-				String error = errorFrom(stdout.text, stderr.text, exit);
+				String error = errorFrom(stdout.text, exit);
 				if (error != null) {
 					throw new IOException(error);
 				}
@@ -392,19 +399,12 @@ public class FidoAuthenticator {
 			}
 		}
 
-		private static String errorFrom(String stdout, String stderr, int exit) {
+		private static String errorFrom(String stdout, int exit) {
 			String jsonError = jsonError(stdout);
 			if (!StringUtils.isBlank(jsonError)) {
-				return jsonError;
+				return safeHelperError(jsonError);
 			}
 			if (exit != 0) {
-				if (!StringUtils.isBlank(stderr)) {
-					String trimmed = stderr.trim();
-					if (trimmed.length() > STDERR_LIMIT) {
-						trimmed = trimmed.substring(0, STDERR_LIMIT);
-					}
-					return "FIDO helper failed: " + trimmed;
-				}
 				return "FIDO helper failed (exit " + exit + ")";
 			}
 			return null;

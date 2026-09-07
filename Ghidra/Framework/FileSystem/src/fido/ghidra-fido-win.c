@@ -192,6 +192,7 @@ int fido_platform_create(const fido_request *req, fido_response *resp, char *err
 	opt.dwAuthenticatorAttachment = WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM;
 	opt.dwUserVerificationRequirement = WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED;
 	opt.bRequireResidentKey = FALSE;
+	opt.dwAttestationConveyancePreference = WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE;
 
 	WEBAUTHN_CREDENTIAL_ATTESTATION *att = NULL;
 	HRESULT hr = WebAuthNAuthenticatorMakeCredential(helper_hwnd(), &rp, &user, &params, &cd,

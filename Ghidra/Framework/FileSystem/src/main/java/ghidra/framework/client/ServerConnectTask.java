@@ -328,10 +328,8 @@ class ServerConnectTask extends Task {
 								}
 								nameCb.setName(username);
 							}
-							String username = nameCb != null ? nameCb.getName()
-									: ClientUtil.getUserName();
-							// Does not consume the challenge; used only to authorize the lookup.
-							gsh.getFidoAllowCredentials(username, fidoCb.getChallenge());
+							// Allow-list lookup is done in processFidoCallback after the
+							// username is known; the challenge is not consumed.
 							if (!ClientUtil.processFidoCallback(callbacks, server.getServerName(),
 								defaultUserID, gsh, loginError)) {
 								return null; // Cancelled by user

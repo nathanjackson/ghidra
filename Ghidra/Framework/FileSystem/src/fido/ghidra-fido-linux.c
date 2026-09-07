@@ -16,9 +16,12 @@
 #include "ghidra-fido-json.h"
 
 #include <fido.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 static uint8_t *dup_mem(const void *src, size_t len) {
 	if (!src || len == 0) {
@@ -31,9 +34,48 @@ static uint8_t *dup_mem(const void *src, size_t len) {
 	return p;
 }
 
+static void wipe(void *p, size_t n) {
+	volatile unsigned char *v = (volatile unsigned char *)p;
+	if (!v) {
+		return;
+	}
+	while (n--) {
+		*v++ = 0;
+	}
+}
+
+static void wipe_pin(char *pin) {
+	if (!pin) {
+		return;
+	}
+	wipe(pin, strlen(pin));
+	free(pin);
+}
+
 static void set_err(char *err, size_t errlen, const char *msg) {
 	if (err && errlen) {
 		snprintf(err, errlen, "%s", msg ? msg : "FIDO helper failed");
+	}
+}
+
+static void set_fido_err(char *err, size_t errlen, int r) {
+	switch (r) {
+		case FIDO_ERR_PIN_REQUIRED:
+			set_err(err, errlen, "security key PIN required");
+			break;
+		case FIDO_ERR_PIN_INVALID:
+			set_err(err, errlen, "security key PIN invalid");
+			break;
+		case FIDO_ERR_PIN_AUTH_BLOCKED:
+		case FIDO_ERR_UV_BLOCKED:
+			set_err(err, errlen, "security key PIN or UV blocked");
+			break;
+		case FIDO_ERR_TIMEOUT:
+			set_err(err, errlen, "FIDO helper timed out");
+			break;
+		default:
+			set_err(err, errlen, "security key assertion or enrollment failed");
+			break;
 	}
 }
 
@@ -53,9 +95,110 @@ static int copy_client_data(const fido_request *req, const char *type, fido_resp
 	return 0;
 }
 
-static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_response *resp) {
+/* libfido2 does not prompt; PIN must come from a real TTY. */
+static char *read_pin_tty(void) {
+	int fd = open("/dev/tty", O_RDWR | O_NOCTTY);
+	if (fd < 0) {
+		return NULL;
+	}
+	FILE *tty = fdopen(fd, "r+");
+	if (!tty) {
+		close(fd);
+		return NULL;
+	}
+	struct termios oldt;
+	struct termios newt;
+	int have_term = tcgetattr(fd, &oldt) == 0;
+	if (have_term) {
+		newt = oldt;
+		newt.c_lflag &= (tcflag_t) ~(ECHO | ECHOE | ECHOK | ECHONL);
+		tcsetattr(fd, TCSANOW, &newt);
+	}
+	fputs("Enter security key PIN: ", tty);
+	fflush(tty);
+	char buf[64];
+	char *got = fgets(buf, (int)sizeof(buf), tty);
+	if (have_term) {
+		tcsetattr(fd, TCSANOW, &oldt);
+	}
+	fputc('\n', tty);
+	fflush(tty);
+	fclose(tty);
+	if (!got) {
+		return NULL;
+	}
+	size_t n = strlen(buf);
+	while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
+		buf[--n] = 0;
+	}
+	if (n < 4 || n > 63) {
+		wipe(buf, sizeof(buf));
+		return NULL;
+	}
+	char *pin = (char *)malloc(n + 1);
+	if (!pin) {
+		wipe(buf, sizeof(buf));
+		return NULL;
+	}
+	memcpy(pin, buf, n + 1);
+	wipe(buf, sizeof(buf));
+	return pin;
+}
+
+static int encode_cbor_bstr(uint8_t *buf, size_t *n, const uint8_t *data, size_t len) {
+	if (len < 24) {
+		buf[(*n)++] = (uint8_t)(0x40 + len);
+	}
+	else if (len <= 0xFF) {
+		buf[(*n)++] = 0x58;
+		buf[(*n)++] = (uint8_t)len;
+	}
+	else {
+		buf[(*n)++] = 0x59;
+		buf[(*n)++] = (uint8_t)(len >> 8);
+		buf[(*n)++] = (uint8_t)len;
+	}
+	if (data != NULL && len > 0) {
+		memcpy(buf + *n, data, len);
+		*n += len;
+	}
+	return 0;
+}
+
+/* Server accepts fmt=none with empty attStmt; never wrap a batch-attestation sig as packed. */
+static int encode_none_attestation(const uint8_t *authdata, size_t authdata_len, uint8_t **out,
+	size_t *out_len) {
+	size_t cap = 32 + authdata_len;
+	uint8_t *buf = (uint8_t *)malloc(cap);
+	if (!buf) {
+		return -1;
+	}
+	size_t n = 0;
+	buf[n++] = 0xA3; /* map(3) */
+	buf[n++] = 0x63;
+	memcpy(buf + n, "fmt", 3);
+	n += 3;
+	buf[n++] = 0x64;
+	memcpy(buf + n, "none", 4);
+	n += 4;
+	buf[n++] = 0x68;
+	memcpy(buf + n, "authData", 8);
+	n += 8;
+	encode_cbor_bstr(buf, &n, authdata, authdata_len);
+	buf[n++] = 0x67;
+	memcpy(buf + n, "attStmt", 7);
+	n += 7;
+	buf[n++] = 0xA0; /* map(0) */
+	*out = buf;
+	*out_len = n;
+	return 0;
+}
+
+static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_response *resp,
+	char *err, size_t errlen) {
 	fido_assert_t *assert = fido_assert_new();
 	if (!assert) {
+		set_err(err, errlen, "security key assertion or enrollment failed");
 		return -1;
 	}
 	int rc = -1;
@@ -77,10 +220,31 @@ static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 			goto done;
 		}
 	}
-	if (fido_dev_get_assert(dev, assert, NULL) != FIDO_OK) {
+	char *pin = NULL;
+	if (fido_dev_has_pin(dev)) {
+		pin = read_pin_tty();
+		if (!pin) {
+			set_err(err, errlen, "security key PIN required");
+			goto done;
+		}
+	}
+	int r = fido_dev_get_assert(dev, assert, pin);
+	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && pin == NULL) {
+		pin = read_pin_tty();
+		if (!pin) {
+			set_err(err, errlen, "security key PIN required");
+			goto done;
+		}
+		r = fido_dev_get_assert(dev, assert, pin);
+	}
+	wipe_pin(pin);
+	pin = NULL;
+	if (r != FIDO_OK) {
+		set_fido_err(err, errlen, r);
 		goto done;
 	}
 	if (fido_assert_count(assert) < 1) {
+		set_err(err, errlen, "security key assertion or enrollment failed");
 		goto done;
 	}
 	resp->credential_id = dup_mem(fido_assert_id_ptr(assert, 0), fido_assert_id_len(assert, 0));
@@ -98,77 +262,19 @@ static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 	if (resp->credential_id && resp->authenticator_data && resp->signature) {
 		rc = 0;
 	}
+	else {
+		set_err(err, errlen, "security key assertion or enrollment failed");
+	}
 done:
 	fido_assert_free(&assert);
 	return rc;
 }
 
-static int encode_packed_attestation(const uint8_t *authdata, size_t authdata_len,
-	const uint8_t *sig, size_t sig_len, uint8_t **out, size_t *out_len) {
-	/* CBOR map: fmt="packed", authData=bytes, attStmt={alg:-7, sig:bytes} */
-	size_t cap = 32 + authdata_len + sig_len + 32;
-	uint8_t *buf = (uint8_t *)malloc(cap);
-	if (!buf) {
-		return -1;
-	}
-	size_t n = 0;
-	buf[n++] = 0xA3; /* map(3) */
-	buf[n++] = 0x63; /* text(3) */
-	memcpy(buf + n, "fmt", 3);
-	n += 3;
-	buf[n++] = 0x66; /* text(6) */
-	memcpy(buf + n, "packed", 6);
-	n += 6;
-	buf[n++] = 0x68; /* text(8) */
-	memcpy(buf + n, "authData", 8);
-	n += 8;
-	if (authdata_len < 24) {
-		buf[n++] = (uint8_t)(0x40 + authdata_len);
-	}
-	else if (authdata_len <= 0xFF) {
-		buf[n++] = 0x58;
-		buf[n++] = (uint8_t)authdata_len;
-	}
-	else {
-		buf[n++] = 0x59;
-		buf[n++] = (uint8_t)(authdata_len >> 8);
-		buf[n++] = (uint8_t)authdata_len;
-	}
-	memcpy(buf + n, authdata, authdata_len);
-	n += authdata_len;
-	buf[n++] = 0x67; /* text(7) */
-	memcpy(buf + n, "attStmt", 7);
-	n += 7;
-	buf[n++] = 0xA2; /* map(2) */
-	buf[n++] = 0x63; /* text(3) */
-	memcpy(buf + n, "alg", 3);
-	n += 3;
-	buf[n++] = 0x26; /* -7 */
-	buf[n++] = 0x63; /* text(3) */
-	memcpy(buf + n, "sig", 3);
-	n += 3;
-	if (sig_len < 24) {
-		buf[n++] = (uint8_t)(0x40 + sig_len);
-	}
-	else if (sig_len <= 0xFF) {
-		buf[n++] = 0x58;
-		buf[n++] = (uint8_t)sig_len;
-	}
-	else {
-		buf[n++] = 0x59;
-		buf[n++] = (uint8_t)(sig_len >> 8);
-		buf[n++] = (uint8_t)sig_len;
-	}
-	memcpy(buf + n, sig, sig_len);
-	n += sig_len;
-	*out = buf;
-	*out_len = n;
-	return 0;
-}
-
-static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_response *resp) {
+static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_response *resp,
+	char *err, size_t errlen) {
 	fido_cred_t *cred = fido_cred_new();
 	if (!cred) {
+		set_err(err, errlen, "security key assertion or enrollment failed");
 		return -1;
 	}
 	int rc = -1;
@@ -194,7 +300,29 @@ static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 	if (fido_cred_set_uv(cred, FIDO_OPT_TRUE) != FIDO_OK) {
 		goto done;
 	}
-	if (fido_dev_make_cred(dev, cred, NULL) != FIDO_OK) {
+	/* Prefer none so the authenticator does not attach packed+x5c. */
+	(void) fido_cred_set_fmt(cred, "none");
+	char *pin = NULL;
+	if (fido_dev_has_pin(dev)) {
+		pin = read_pin_tty();
+		if (!pin) {
+			set_err(err, errlen, "security key PIN required");
+			goto done;
+		}
+	}
+	int r = fido_dev_make_cred(dev, cred, pin);
+	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && pin == NULL) {
+		pin = read_pin_tty();
+		if (!pin) {
+			set_err(err, errlen, "security key PIN required");
+			goto done;
+		}
+		r = fido_dev_make_cred(dev, cred, pin);
+	}
+	wipe_pin(pin);
+	pin = NULL;
+	if (r != FIDO_OK) {
+		set_fido_err(err, errlen, r);
 		goto done;
 	}
 	resp->credential_id = dup_mem(fido_cred_id_ptr(cred), fido_cred_id_len(cred));
@@ -207,22 +335,24 @@ static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 	}
 	resp->authenticator_data = dup_mem(auth, auth_len);
 	resp->authenticator_data_len = auth_len;
-	resp->signature = dup_mem(fido_cred_sig_ptr(cred), fido_cred_sig_len(cred));
-	resp->signature_len = fido_cred_sig_len(cred);
-	if (encode_packed_attestation(auth, auth_len, fido_cred_sig_ptr(cred),
-		fido_cred_sig_len(cred), &resp->attestation_object,
+	if (encode_none_attestation(auth, auth_len, &resp->attestation_object,
 		&resp->attestation_object_len) != 0) {
+		set_err(err, errlen, "security key assertion or enrollment failed");
 		goto done;
 	}
-	if (resp->credential_id && resp->authenticator_data) {
+	if (resp->credential_id && resp->authenticator_data && resp->attestation_object) {
 		rc = 0;
+	}
+	else {
+		set_err(err, errlen, "security key assertion or enrollment failed");
 	}
 done:
 	fido_cred_free(&cred);
 	return rc;
 }
 
-static int with_devices(int (*fn)(fido_dev_t *, const fido_request *, fido_response *),
+static int with_devices(
+	int (*fn)(fido_dev_t *, const fido_request *, fido_response *, char *, size_t),
 	const fido_request *req, fido_response *resp, char *err, size_t errlen) {
 	fido_init(0);
 	size_t max = 16;
@@ -238,6 +368,8 @@ static int with_devices(int (*fn)(fido_dev_t *, const fido_request *, fido_respo
 		return -1;
 	}
 	int rc = -1;
+	char last[FIDO_ERR_LEN];
+	last[0] = 0;
 	for (size_t i = 0; i < ndevs; i++) {
 		const fido_dev_info_t *di = fido_dev_info_ptr(list, i);
 		fido_dev_t *dev = fido_dev_new();
@@ -248,7 +380,11 @@ static int with_devices(int (*fn)(fido_dev_t *, const fido_request *, fido_respo
 			fido_dev_free(&dev);
 			continue;
 		}
-		if (fn(dev, req, resp) == 0) {
+		if (req->timeout_ms > 0) {
+			(void) fido_dev_set_timeout(dev, req->timeout_ms);
+		}
+		last[0] = 0;
+		if (fn(dev, req, resp, last, sizeof(last)) == 0) {
 			rc = 0;
 			fido_dev_close(dev);
 			fido_dev_free(&dev);
@@ -259,7 +395,7 @@ static int with_devices(int (*fn)(fido_dev_t *, const fido_request *, fido_respo
 	}
 	fido_dev_info_free(&list, max);
 	if (rc != 0) {
-		set_err(err, errlen, "security key assertion or enrollment failed");
+		set_err(err, errlen, last[0] ? last : "security key assertion or enrollment failed");
 	}
 	return rc;
 }

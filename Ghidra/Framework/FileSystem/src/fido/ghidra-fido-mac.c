@@ -104,7 +104,7 @@ static void set_err(char *err, size_t errlen, const char *msg) {
 		self.errorMessage = @"cancelled";
 	}
 	else {
-		self.errorMessage = error.localizedDescription ?: @"security key request failed";
+		self.errorMessage = @"security key request failed";
 	}
 	self.done = YES;
 	[NSApp stop:nil];
@@ -129,6 +129,8 @@ static int run_request(const fido_request *req, fido_response *resp, int create,
 			set_err(err, errlen, "invalid rpId");
 			return -1;
 		}
+		/* AuthenticationServices has no origin argument; it emits clientDataJSON from rpId. */
+		(void) req->origin;
 		NSData *challenge = [NSData dataWithBytes:req->challenge length:req->challenge_len];
 		ASAuthorizationSecurityKeyPublicKeyCredentialProvider *provider =
 			[[ASAuthorizationSecurityKeyPublicKeyCredentialProvider alloc]
@@ -147,6 +149,7 @@ static int run_request(const fido_request *req, fido_response *resp, int create,
 					userID:userId];
 			reg.userVerificationPreference =
 				ASAuthorizationPublicKeyCredentialUserVerificationPreferenceRequired;
+			reg.attestationPreference = ASAuthorizationPublicKeyCredentialAttestationKindNone;
 			if (@available(macOS 13.0, *)) {
 				reg.residentKeyPreference =
 					ASAuthorizationPublicKeyCredentialResidentKeyPreferenceDiscouraged;

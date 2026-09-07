@@ -152,6 +152,33 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testProcessHelperStderrIsNotCopied() throws Exception {
+		File script = File.createTempFile("ghidra-fido-err", ".sh");
+		script.deleteOnExit();
+		String body = "#!/bin/sh\ncat >/dev/null\n" +
+			"echo 'secret-signature-bytes challenge=AAAA enroll=token' >&2\nexit 2\n";
+		Files.writeString(script.toPath(), body, StandardCharsets.UTF_8);
+		if (!script.setExecutable(true)) {
+			return;
+		}
+
+		FidoAuthenticator auth =
+			new FidoAuthenticator(new FidoAuthenticator.ProcessFidoHelper(script));
+		FidoAuthenticationCallback cb = newCallback(false);
+		try {
+			auth.complete(cb, "alice", null, new byte[][] { CRED_ID });
+			fail("expected IOException");
+		}
+		catch (IOException e) {
+			assertEquals("FIDO helper failed (exit 2)", e.getMessage());
+			assertFalse(e.getMessage().contains("secret-signature"));
+			assertFalse(e.getMessage().contains("AAAA"));
+			assertFalse(e.getMessage().contains(ENROLL_TOKEN));
+		}
+		assertNull(cb.getCredentialId());
+	}
+
+	@Test
 	public void testBlankUsernameRejected() throws Exception {
 		FidoAuthenticator auth = new FidoAuthenticator((json, timeoutMs) -> {
 			fail("helper should not run");
