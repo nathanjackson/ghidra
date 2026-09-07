@@ -18,7 +18,10 @@ package ghidra.server.security.fido;
 import static org.junit.Assert.*;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -177,5 +180,57 @@ public class FidoCredentialStoreTest extends AbstractGenericTest {
 		assertTrue(store.loadCredentials("nobody").isEmpty());
 		assertFalse(store.hasPendingEnrollToken("nobody"));
 		assertFalse(store.consumeEnrollToken("nobody", "x"));
+	}
+
+	@Test
+	public void testFidoDirOwnerOnlyPermissions() throws Exception {
+		File fidoDir = new File(root, FidoCredentialStore.FIDO_DIR_NAME);
+		assertTrue(fidoDir.isDirectory());
+		Set<PosixFilePermission> perms = Files.getPosixFilePermissions(fidoDir.toPath());
+		assertTrue(perms.contains(PosixFilePermission.OWNER_READ));
+		assertTrue(perms.contains(PosixFilePermission.OWNER_WRITE));
+		assertTrue(perms.contains(PosixFilePermission.OWNER_EXECUTE));
+		assertFalse(perms.contains(PosixFilePermission.GROUP_READ));
+		assertFalse(perms.contains(PosixFilePermission.GROUP_WRITE));
+		assertFalse(perms.contains(PosixFilePermission.GROUP_EXECUTE));
+		assertFalse(perms.contains(PosixFilePermission.OTHERS_READ));
+		assertFalse(perms.contains(PosixFilePermission.OTHERS_WRITE));
+		assertFalse(perms.contains(PosixFilePermission.OTHERS_EXECUTE));
+	}
+
+	@Test
+	public void testExistingFidoDirIsChmoddedOwnerOnly() throws Exception {
+		File fidoDir = new File(root, FidoCredentialStore.FIDO_DIR_NAME);
+		assertTrue(fidoDir.setReadable(true, false));
+		assertTrue(fidoDir.setWritable(true, false));
+		assertTrue(fidoDir.setExecutable(true, false));
+
+		FidoCredentialStore again = new FidoCredentialStore(root);
+		again.loadCredentials(USER);
+
+		Set<PosixFilePermission> perms = Files.getPosixFilePermissions(fidoDir.toPath());
+		assertFalse(perms.contains(PosixFilePermission.GROUP_READ));
+		assertFalse(perms.contains(PosixFilePermission.OTHERS_READ));
+		assertFalse(perms.contains(PosixFilePermission.GROUP_EXECUTE));
+		assertFalse(perms.contains(PosixFilePermission.OTHERS_EXECUTE));
+	}
+
+	@Test
+	public void testMalformedHashRejected() throws Exception {
+		try {
+			store.issueEnrollTokenHash(USER, "not-a-hash",
+				System.currentTimeMillis() + FidoCredentialStore.DEFAULT_ENROLL_TTL_MS);
+			fail("expected IllegalArgumentException");
+		}
+		catch (IllegalArgumentException e) {
+			assertTrue(e.getMessage().contains("64 hex"));
+		}
+		assertFalse(store.hasPendingEnrollToken(USER));
+		assertNull(FidoCredentialStore.decodeTokenHash("xyz"));
+		assertNull(FidoCredentialStore.decodeTokenHash(""));
+		byte[] digest = FidoCredentialStore.decodeTokenHash(
+			FidoCredentialStore.hashEnrollToken("token"));
+		assertNotNull(digest);
+		assertEquals(32, digest.length);
 	}
 }

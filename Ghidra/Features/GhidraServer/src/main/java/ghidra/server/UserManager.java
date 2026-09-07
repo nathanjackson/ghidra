@@ -459,6 +459,9 @@ public class UserManager {
 	 */
 	public boolean removeUser(String username) throws IOException {
 		synchronized (repositoryMgr) {
+			if (isValidUserName(username)) {
+				fidoStore.removeAll(username);
+			}
 			UserEntry oldEntry = userList.remove(username);
 			if (oldEntry != null) {
 				if (oldEntry.x500User != null) {
@@ -466,7 +469,6 @@ public class UserManager {
 				}
 				writeUserList();
 				repositoryMgr.userRemoved(username);
-				fidoStore.removeAll(username);
 				log.info("User removed from server: " + username);
 				return true;
 			}

@@ -156,6 +156,71 @@ public class FidoAdminTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testRevokeCredentialIdStartingWithDash() throws Exception {
+		String dashId = "-abcDEFghij0123456789-_";
+		FidoCredentialStore prep = new FidoCredentialStore(root);
+		prep.addCredential(USER, new FidoCredential(dashId, "cose-1", 0L, null, 1L));
+		prep.addCredential(USER, new FidoCredential(CRED_ID_2, "cose-2", 0L, null, 2L));
+
+		new ServerAdmin().execute(
+			new String[] { root.getAbsolutePath(), "-fido-revoke", USER, dashId });
+
+		File cmdDir = new File(root, "~admin");
+		File[] cmdFiles = cmdDir.listFiles(CommandProcessor.CMD_FILE_FILTER);
+		assertNotNull(cmdFiles);
+		assertEquals(1, cmdFiles.length);
+		List<String> lines = FileUtilities.getLines(cmdFiles[0]);
+		assertEquals(1, lines.size());
+		assertEquals(CommandProcessor.FIDO_REVOKE_COMMAND + " " + USER + " " + dashId, lines.get(0));
+
+		mgr = new RepositoryManager(root, false, 0, false);
+		FidoCredentialStore store = mgr.getUserManager().getFidoCredentialStore();
+		List<FidoCredential> remaining = store.loadCredentials(USER);
+		assertEquals(1, remaining.size());
+		assertEquals(CRED_ID_2, remaining.get(0).getCredentialId());
+	}
+
+	@Test
+	public void testRemoveUserRetryDeletesOrphanSidecar() throws Exception {
+		mgr = new RepositoryManager(root, false, 0, false);
+		FidoCredentialStore store = mgr.getUserManager().getFidoCredentialStore();
+		store.addCredential(USER, new FidoCredential(CRED_ID_1, "cose-1", 1L, null, 1L));
+		assertTrue(mgr.getUserManager().removeUser(USER));
+		assertFalse(mgr.getUserManager().isValidUser(USER));
+
+		store.addCredential(USER, new FidoCredential(CRED_ID_1, "cose-1", 1L, null, 1L));
+		File jsonFile = new File(new File(root, FidoCredentialStore.FIDO_DIR_NAME),
+			USER + FidoCredentialStore.CREDENTIAL_FILE_EXT);
+		assertTrue(jsonFile.isFile());
+
+		assertFalse(mgr.getUserManager().removeUser(USER));
+		assertFalse(jsonFile.exists());
+	}
+
+	@Test
+	public void testInvalidRevokeDoesNotAbortQueue() throws Exception {
+		mgr = new RepositoryManager(root, false, 0, false);
+		String hash = FidoCredentialStore.hashEnrollToken("queued-token");
+		long expiry = System.currentTimeMillis() + FidoCredentialStore.DEFAULT_ENROLL_TTL_MS;
+		File cmdDir = CommandProcessor.getOrCreateCommandDir(root);
+		CommandProcessor.writeCommands(List.of(
+			CommandProcessor.FIDO_REVOKE_COMMAND + " ../etc",
+			CommandProcessor.FIDO_ENROLL_COMMAND + " " + USER + " " + hash + " " + expiry),
+			cmdDir);
+		CommandProcessor.processCommands(mgr);
+		assertTrue(mgr.getUserManager().getFidoCredentialStore().hasPendingEnrollToken(USER));
+	}
+
+	@Test
+	public void testMalformedEnrollHashDoesNotWrite() throws Exception {
+		mgr = new RepositoryManager(root, false, 0, false);
+		writeCommand(CommandProcessor.FIDO_ENROLL_COMMAND + " " + USER + " not-a-hash " +
+			(System.currentTimeMillis() + FidoCredentialStore.DEFAULT_ENROLL_TTL_MS));
+		CommandProcessor.processCommands(mgr);
+		assertFalse(mgr.getUserManager().getFidoCredentialStore().hasPendingEnrollToken(USER));
+	}
+
+	@Test
 	public void testFidoListPrintsCredentialsAndPendingEnroll() throws Exception {
 		FidoCredentialStore store = new FidoCredentialStore(root);
 		store.addCredential(USER,

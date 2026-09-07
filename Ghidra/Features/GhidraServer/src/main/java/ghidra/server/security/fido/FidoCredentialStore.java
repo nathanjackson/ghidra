@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -34,6 +35,7 @@ import generic.hash.HashUtilities;
 import generic.random.SecureRandomFactory;
 import ghidra.framework.store.local.LocalFileSystem;
 import ghidra.server.UserManager;
+import ghidra.util.NumericUtilities;
 import utilities.util.FileUtilities;
 
 /**
@@ -60,6 +62,8 @@ public class FidoCredentialStore {
 	public static final long DEFAULT_ENROLL_TTL_MS = 15L * 60L * 1000L;
 
 	private static final int ENROLL_TOKEN_BYTES = 20;
+	private static final int TOKEN_HASH_BYTES = 32;
+	private static final Pattern TOKEN_HASH_PATTERN = Pattern.compile("[0-9a-f]{64}");
 	private static final Gson GSON =
 		new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 	private static final Type CREDENTIAL_LIST_TYPE =
@@ -76,8 +80,11 @@ public class FidoCredentialStore {
 			throw new IllegalArgumentException("repositoriesRootDir is required");
 		}
 		this.fidoDir = new File(repositoriesRootDir, FIDO_DIR_NAME);
-		if (!fidoDir.exists()) {
-			fidoDir.mkdir();
+		try {
+			getFidoDir();
+		}
+		catch (IOException e) {
+			// retried on first use
 		}
 	}
 
@@ -114,8 +121,8 @@ public class FidoCredentialStore {
 			if (!fidoDir.mkdirs() && !fidoDir.isDirectory()) {
 				throw new IOException("Failed to create FIDO directory: " + fidoDir);
 			}
-			FileUtilities.setOwnerOnlyPermissions(fidoDir);
 		}
+		setOwnerOnlyDirectory(fidoDir);
 		return fidoDir;
 	}
 
@@ -267,7 +274,7 @@ public class FidoCredentialStore {
 	/**
 	 * Store a hashed enroll token and expiry, replacing any previous token.
 	 * @param username user name/SID
-	 * @param hash SHA-256 hex digest of the plaintext token
+	 * @param hash SHA-256 hex digest of the plaintext token (exactly 64 hex characters)
 	 * @param expiresEpochMs expiration time in milliseconds since the epoch
 	 * @throws IOException if the file cannot be written
 	 * @throws IllegalArgumentException if {@code username} or {@code hash} is invalid
@@ -275,8 +282,9 @@ public class FidoCredentialStore {
 	public synchronized void issueEnrollTokenHash(String username, String hash,
 			long expiresEpochMs) throws IOException {
 		checkUserName(username);
-		if (hash == null || hash.isBlank()) {
-			throw new IllegalArgumentException("token hash is required");
+		byte[] digest = decodeTokenHash(hash);
+		if (digest == null) {
+			throw new IllegalArgumentException("token hash must be 64 hex characters");
 		}
 		EnrollTokenRecord record = new EnrollTokenRecord();
 		record.tokenHash = hash.trim().toLowerCase(Locale.ROOT);
@@ -372,12 +380,33 @@ public class FidoCredentialStore {
 	}
 
 	private static boolean hashesEqual(String storedHex, String actualHex) {
-		if (storedHex == null || actualHex == null) {
+		byte[] stored = decodeTokenHash(storedHex);
+		byte[] actual = decodeTokenHash(actualHex);
+		if (stored == null || actual == null) {
 			return false;
 		}
-		byte[] stored = storedHex.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.US_ASCII);
-		byte[] actual = actualHex.getBytes(StandardCharsets.US_ASCII);
 		return MessageDigest.isEqual(stored, actual);
+	}
+
+	/**
+	 * Decode a SHA-256 hex digest to 32 raw bytes, or null if it is not
+	 * exactly 64 lowercase/uppercase hex characters.
+	 * @param hash candidate hex digest
+	 * @return 32-byte digest, or null if malformed
+	 */
+	static byte[] decodeTokenHash(String hash) {
+		if (hash == null) {
+			return null;
+		}
+		String normalized = hash.trim().toLowerCase(Locale.ROOT);
+		if (!TOKEN_HASH_PATTERN.matcher(normalized).matches()) {
+			return null;
+		}
+		byte[] digest = NumericUtilities.convertStringToBytes(normalized);
+		if (digest == null || digest.length != TOKEN_HASH_BYTES) {
+			return null;
+		}
+		return digest;
 	}
 
 	private File credentialFile(String username) throws IOException {
@@ -388,9 +417,14 @@ public class FidoCredentialStore {
 		return new File(getFidoDir(), username + ENROLL_FILE_EXT);
 	}
 
+	private static void setOwnerOnlyDirectory(File dir) {
+		FileUtilities.setOwnerOnlyPermissions(dir);
+		dir.setExecutable(false, false);
+		dir.setExecutable(true, true);
+	}
+
 	private void writeAtomically(File file, String json) throws IOException {
 		File dir = getFidoDir();
-		FileUtilities.setOwnerOnlyPermissions(dir);
 		File tmp = File.createTempFile(file.getName(), ".tmp", dir);
 		try {
 			FileUtilities.writeStringToFile(tmp, json);

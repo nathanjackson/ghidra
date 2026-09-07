@@ -477,13 +477,38 @@ public class ServerAdmin implements GhidraLaunchable {
 	}
 
 	/**
-	 * Optional credential id for {@code -fido-revoke}: next arg exists and is not a switch.
+	 * Optional credential id for {@code -fido-revoke}. Base64url ids may start with
+	 * {@code '-'}, so the next argv is taken as an id unless it is a known svrAdmin command.
 	 * @param args command line args
 	 * @param argOffset index of optional credential id
 	 * @return true if a credential id argument is present
 	 */
 	private boolean hasOptionalCredentialId(String[] args, int argOffset) {
-		return argOffset < args.length && !args[argOffset].startsWith("-");
+		return argOffset < args.length && !isSvrAdminCommand(args[argOffset]);
+	}
+
+	private static boolean isSvrAdminCommand(String arg) {
+		if (arg == null) {
+			return false;
+		}
+		switch (arg) {
+			case CommandProcessor.ADD_USER_COMMAND:
+			case CommandProcessor.REMOVE_USER_COMMAND:
+			case CommandProcessor.RESET_USER_COMMAND:
+			case CommandProcessor.SET_USER_DN_COMMAND:
+			case CommandProcessor.GRANT_USER_COMMAND:
+			case CommandProcessor.REVOKE_USER_COMMAND:
+			case CommandProcessor.FIDO_ENROLL_COMMAND:
+			case CommandProcessor.FIDO_LIST_COMMAND:
+			case CommandProcessor.FIDO_REVOKE_COMMAND:
+			case LIST_COMMAND:
+			case USERS_COMMAND:
+			case MIGRATE_COMMAND:
+			case MIGRATE_ALL_COMMAND:
+				return true;
+			default:
+				return false;
+		}
 	}
 
 	/**

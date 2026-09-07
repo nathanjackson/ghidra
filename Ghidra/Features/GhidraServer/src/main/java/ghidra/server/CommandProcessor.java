@@ -230,26 +230,37 @@ public class CommandProcessor {
 					log.error("Failed to process FIDO enroll command; invalid expiry: " + args[3]);
 					return;
 				}
-				userMgr.getFidoCredentialStore().issueEnrollTokenHash(sid, tokenHash,
-					expiresEpochMs);
+				try {
+					userMgr.getFidoCredentialStore().issueEnrollTokenHash(sid, tokenHash,
+						expiresEpochMs);
+				}
+				catch (IllegalArgumentException e) {
+					log.error("Failed to process FIDO enroll command: " + e.getMessage());
+					return;
+				}
 				log.info("FIDO enroll token issued for user '" + sid + "'");
 				break;
 			case FIDO_REVOKE_COMMAND:
 				sid = args[1];
-				FidoCredentialStore fidoStore = userMgr.getFidoCredentialStore();
-				if (args.length >= 3) {
-					String credentialId = args[2];
-					if (!fidoStore.removeCredential(sid, credentialId)) {
-						log.info("FIDO credential not found for user '" + sid + "': " +
-							credentialId);
+				try {
+					FidoCredentialStore fidoStore = userMgr.getFidoCredentialStore();
+					if (args.length >= 3) {
+						String credentialId = args[2];
+						if (!fidoStore.removeCredential(sid, credentialId)) {
+							log.info("FIDO credential not found for user '" + sid + "': " +
+								credentialId);
+						}
+						else {
+							log.info("FIDO credential revoked for user '" + sid + "'");
+						}
 					}
 					else {
-						log.info("FIDO credential revoked for user '" + sid + "'");
+						fidoStore.removeAll(sid);
+						log.info("All FIDO credentials revoked for user '" + sid + "'");
 					}
 				}
-				else {
-					fidoStore.removeAll(sid);
-					log.info("All FIDO credentials revoked for user '" + sid + "'");
+				catch (IllegalArgumentException e) {
+					log.error("Failed to process FIDO revoke command: " + e.getMessage());
 				}
 				break;
 			default:
@@ -311,7 +322,7 @@ public class CommandProcessor {
 				try {
 					processCommand(repositoryMgr, cmdStr.trim());
 				}
-				catch (ArrayIndexOutOfBoundsException e) {
+				catch (ArrayIndexOutOfBoundsException | IllegalArgumentException e) {
 					log.error("Error occured processing command: " + cmdStr);
 				}
 			}
