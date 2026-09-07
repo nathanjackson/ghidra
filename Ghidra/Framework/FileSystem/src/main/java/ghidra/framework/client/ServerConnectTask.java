@@ -31,6 +31,7 @@ import javax.net.ssl.SSLSocket;
 import javax.rmi.ssl.SslRMIClientSocketFactory;
 import javax.security.auth.Subject;
 import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.NameCallback;
 import javax.security.auth.callback.PasswordCallback;
 import javax.security.auth.login.FailedLoginException;
 import javax.security.auth.login.LoginException;
@@ -249,6 +250,8 @@ class ServerConnectTask extends Task {
 			callbacks = gsh.getAuthenticationCallbacks();
 
 			SignatureCallback pkiSignatureCb = null;
+			FidoAuthenticationCallback fidoCb = null;
+			NameCallback nameCb = null;
 			boolean hasSSHSignatureCallback = false;
 			if (callbacks != null) {
 				for (Callback cb : callbacks) {
@@ -257,6 +260,12 @@ class ServerConnectTask extends Task {
 					}
 					else if (cb instanceof SSHSignatureCallback) {
 						hasSSHSignatureCallback = true;
+					}
+					else if (cb instanceof FidoAuthenticationCallback) {
+						fidoCb = (FidoAuthenticationCallback) cb;
+					}
+					else if (cb instanceof NameCallback) {
+						nameCb = (NameCallback) cb;
 					}
 				}
 			}
@@ -305,6 +314,29 @@ class ServerConnectTask extends Task {
 							ClientUtil.processSignatureCallback(server.getServerName(),
 								pkiSignatureCb);
 						}
+						else if (fidoCb != null) {
+							if (nameCb != null) {
+								String username = nameCb.getName();
+								if (username == null || username.isBlank()) {
+									username = nameCb.getDefaultName();
+								}
+								if (username == null || username.isBlank()) {
+									username = defaultUserID;
+								}
+								if (username == null || username.isBlank()) {
+									username = ClientUtil.getUserName();
+								}
+								nameCb.setName(username);
+							}
+							String username = nameCb != null ? nameCb.getName()
+									: ClientUtil.getUserName();
+							// Does not consume the challenge; used only to authorize the lookup.
+							gsh.getFidoAllowCredentials(username, fidoCb.getChallenge());
+							if (!ClientUtil.processFidoCallback(callbacks, server.getServerName(),
+								defaultUserID, gsh, loginError)) {
+								return null; // Cancelled by user
+							}
+						}
 						else {
 							// assume all other callback scenarios are password based
 							// anonymous option must be explicitly chosen over username/password
@@ -345,6 +377,11 @@ class ServerConnectTask extends Task {
 				for (Callback callback : callbacks) {
 					if (callback instanceof PasswordCallback) {
 						((PasswordCallback) callback).clearPassword();
+					}
+					else if (callback instanceof FidoAuthenticationCallback fido) {
+						fido.clearEnrollToken();
+						fido.clearAssertion();
+						fido.clearAttestationObject();
 					}
 				}
 			}

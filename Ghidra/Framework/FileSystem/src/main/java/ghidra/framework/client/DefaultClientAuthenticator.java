@@ -16,6 +16,7 @@
 package ghidra.framework.client;
 
 import java.awt.Component;
+import java.io.IOException;
 import java.net.*;
 
 import javax.security.auth.callback.*;
@@ -24,14 +25,27 @@ import org.apache.commons.lang3.StringUtils;
 
 import docking.DockingWindowManager;
 import docking.widgets.*;
+import ghidra.framework.client.fido.FidoAllowCredentialsLookup;
+import ghidra.framework.client.fido.FidoAuthenticator;
+import ghidra.framework.client.fido.FidoLoginDialog;
 import ghidra.framework.preferences.Preferences;
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.FidoAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.util.Msg;
 import ghidra.util.SystemUtilities;
 
 public class DefaultClientAuthenticator extends PopupKeyStorePasswordProvider
 		implements ClientAuthenticator {
+
+	private FidoAuthenticator fidoAuthenticator = new FidoAuthenticator();
+
+	public DefaultClientAuthenticator() {
+	}
+
+	DefaultClientAuthenticator(FidoAuthenticator fidoAuthenticator) {
+		this.fidoAuthenticator = fidoAuthenticator;
+	}
 
 	private Authenticator authenticator = new Authenticator() {
 		@Override
@@ -147,6 +161,28 @@ public class DefaultClientAuthenticator extends PopupKeyStorePasswordProvider
 			allowUserNameEntry, nameCb, passCb, choiceCb, anonymousCb, loginError);
 		SystemUtilities.runSwingNow(pp);
 		return pp.okWasPressed();
+	}
+
+	@Override
+	public boolean processFidoCallback(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
+			String serverName) throws IOException {
+		return processFidoCallback(nameCb, fidoCb, serverName, null, null);
+	}
+
+	boolean processFidoCallback(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
+			String serverName, FidoAllowCredentialsLookup allowLookup, String loginError)
+			throws IOException {
+		FidoLoginDialog dlg = new FidoLoginDialog(nameCb, fidoCb, serverName, fidoAuthenticator,
+			allowLookup, loginError);
+		try {
+			DockingWindowManager winMgr = DockingWindowManager.getActiveInstance();
+			Component rootFrame = winMgr != null ? winMgr.getRootFrame() : null;
+			DockingWindowManager.showDialog(rootFrame, dlg);
+			return dlg.okWasPressed();
+		}
+		finally {
+			dlg.dispose();
+		}
 	}
 
 	@Override

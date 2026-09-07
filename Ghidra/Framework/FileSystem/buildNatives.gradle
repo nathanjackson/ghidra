@@ -1,0 +1,143 @@
+/* ###
+ * IP: GHIDRA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// Native build files are already applied in development mode (indicated by presence of the
+// Generic project).  Only need to apply them if we are in a distribution.
+if (findProject(':Generic') == null) {
+	// running from within Ghidra install
+	apply from: "../../../GPL/utils.gradle"
+	apply from: "../../../GPL/nativePlatforms.gradle"
+	apply from: "../../../GPL/nativeBuildProperties.gradle"
+}
+
+def fido2Cflags = []
+def fido2Libs = ["-lfido2"]
+try {
+	def cflagsProc = "pkg-config --cflags libfido2".execute()
+	cflagsProc.waitFor()
+	if (cflagsProc.exitValue() == 0) {
+		def cflags = cflagsProc.text.trim()
+		if (cflags) {
+			fido2Cflags = cflags.split("\\s+")
+		}
+	}
+	def libsProc = "pkg-config --libs libfido2".execute()
+	libsProc.waitFor()
+	if (libsProc.exitValue() == 0) {
+		def libs = libsProc.text.trim()
+		if (libs) {
+			fido2Libs = libs.split("\\s+")
+		}
+	}
+}
+catch (Exception e) {
+	// libfido2 is optional at configure time; Linux link still requests -lfido2
+}
+
+model {
+	components {
+		ghidraFido(NativeExecutableSpec) {
+			baseName "ghidra-fido"
+
+			targetPlatform "win_x86_64"
+			targetPlatform "win_arm_64"
+			targetPlatform "linux_x86_64"
+			targetPlatform "linux_arm_64"
+			targetPlatform "mac_x86_64"
+			targetPlatform "mac_arm_64"
+			targetPlatform "freebsd_x86_64"
+			targetPlatform "freebsd_arm_64"
+			targetPlatform "openbsd_x86_64"
+			targetPlatform "openbsd_arm_64"
+
+			sources {
+				c {
+					source {
+						srcDir "src/fido"
+						include "ghidra-fido.c"
+						include "ghidra-fido-json.c"
+					}
+				}
+			}
+		}
+	}
+
+	binaries {
+		all { b ->
+			if (b.toolChain in Gcc) {
+				b.cCompiler.args "-std=c99"
+				b.cCompiler.args "-Wall"
+				b.cCompiler.args "-O2"
+				if (b.targetPlatform.operatingSystem.linux) {
+					b.cCompiler.define "LINUX"
+					b.cCompiler.define "_LINUX"
+					fido2Cflags.each { arg -> b.cCompiler.args arg }
+					fido2Libs.each { arg -> b.linker.args arg }
+				}
+				if (b.targetPlatform.operatingSystem.name == "freebsd" ||
+					b.targetPlatform.operatingSystem.name == "openbsd") {
+					fido2Cflags.each { arg -> b.cCompiler.args arg }
+					fido2Libs.each { arg -> b.linker.args arg }
+				}
+			}
+			else if (b.toolChain in VisualCpp) {
+				if (b.targetPlatform.operatingSystem.windows) {
+					b.cCompiler.define "WINDOWS"
+					b.cCompiler.define "_WINDOWS"
+					b.cCompiler.define "WIN32"
+					b.cCompiler.define "_WIN32"
+					if (b.targetPlatform.name == "win_x86_64") {
+						b.cCompiler.define "WIN64"
+						b.cCompiler.define "_WIN64"
+					}
+					b.linker.args "webauthn.lib"
+				}
+				b.cCompiler.args "/O2"
+			}
+			else if (b.toolChain in Clang) {
+				b.cCompiler.args "-Wall"
+				b.cCompiler.args "-O2"
+				def osName = b.targetPlatform.operatingSystem.name
+				if (osName == "osx") {
+					b.cCompiler.args "-x"
+					b.cCompiler.args "objective-c"
+					b.cCompiler.args "-fobjc-arc"
+					b.linker.args "-framework"
+					b.linker.args "Foundation"
+					b.linker.args "-framework"
+					b.linker.args "AppKit"
+					b.linker.args "-framework"
+					b.linker.args "AuthenticationServices"
+					b.linker.args "-sectcreate"
+					b.linker.args "__TEXT"
+					b.linker.args "__info_plist"
+					b.linker.args "${project.projectDir}/src/fido/ghidra-fido-Info.plist"
+				}
+				else {
+					b.cCompiler.args "-std=c99"
+					if (b.targetPlatform.operatingSystem.linux || osName == "freebsd" ||
+						osName == "openbsd") {
+						fido2Cflags.each { arg -> b.cCompiler.args arg }
+						fido2Libs.each { arg -> b.linker.args arg }
+					}
+					if (osName == "freebsd") {
+						b.cCompiler.define "_XOPEN_SOURCE", "600"
+					}
+				}
+			}
+		}
+	}
+}

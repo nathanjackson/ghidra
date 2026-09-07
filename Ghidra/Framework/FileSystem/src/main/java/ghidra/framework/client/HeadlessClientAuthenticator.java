@@ -25,6 +25,7 @@ import javax.security.auth.callback.*;
 import org.apache.commons.lang3.StringUtils;
 
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.FidoAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.framework.remote.security.SSHKeyManager;
 import ghidra.net.DefaultKeyManagerFactory;
@@ -359,6 +360,13 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 	@Override
 	public boolean isSSHKeyAvailable() {
 		return sshPrivateKey != null;
+	}
+
+	@Override
+	public boolean processFidoCallback(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
+			String serverName) throws IOException {
+		throw new IOException(
+			"FIDO authentication requires the GUI client. Headless FIDO login is not supported in this release.");
 	}
 
 }

@@ -26,7 +26,10 @@ import java.util.Hashtable;
 import javax.security.auth.callback.*;
 import javax.security.auth.login.LoginException;
 
+import org.apache.commons.lang3.StringUtils;
+
 import generic.hash.HashUtilities;
+import ghidra.framework.client.fido.FidoAllowCredentialsLookup;
 import ghidra.framework.model.ServerInfo;
 import ghidra.framework.remote.*;
 import ghidra.framework.remote.security.SSHKeyManager;
@@ -462,6 +465,68 @@ public class ClientUtil {
 			}
 			throw new IOException(msg, e);
 		}
+	}
+
+	static boolean processFidoCallback(Callback[] callbacks, String serverName,
+			String defaultUserID, GhidraServerHandle gsh, String loginError) throws IOException {
+		getClientAuthenticator();
+		if (clientAuthenticator == null) {
+			Msg.error(ClientUtil.class, "Unable to authenticate user without ClientAuthenticator");
+			return false;
+		}
+		NameCallback nameCb = null;
+		FidoAuthenticationCallback fidoCb = null;
+		for (Callback callback : callbacks) {
+			if (callback instanceof NameCallback) {
+				nameCb = (NameCallback) callback;
+			}
+			else if (callback instanceof FidoAuthenticationCallback) {
+				fidoCb = (FidoAuthenticationCallback) callback;
+			}
+		}
+		if (fidoCb == null) {
+			throw new IOException("FIDO authentication callback required");
+		}
+		if (nameCb != null) {
+			String name = nameCb.getName();
+			if (StringUtils.isBlank(name)) {
+				name = nameCb.getDefaultName();
+			}
+			if (StringUtils.isBlank(name)) {
+				name = defaultUserID;
+			}
+			if (StringUtils.isBlank(name)) {
+				name = getUserName();
+			}
+			nameCb.setName(name);
+		}
+		FidoAllowCredentialsLookup lookup = null;
+		if (gsh != null) {
+			byte[] challenge = fidoCb.getChallenge();
+			String username = nameCb != null ? nameCb.getName() : defaultUserID;
+			gsh.getFidoAllowCredentials(username, challenge);
+			lookup = user -> gsh.getFidoAllowCredentials(user, challenge);
+		}
+		boolean ok;
+		if (clientAuthenticator instanceof DefaultClientAuthenticator defaultAuth) {
+			ok = defaultAuth.processFidoCallback(nameCb, fidoCb, serverName, lookup, loginError);
+		}
+		else {
+			ok = clientAuthenticator.processFidoCallback(nameCb, fidoCb, serverName);
+		}
+		if (!ok) {
+			return false;
+		}
+		String name = defaultUserID;
+		if (nameCb != null) {
+			name = nameCb.getName();
+			if (name == null) {
+				name = nameCb.getDefaultName();
+			}
+		}
+		Msg.info(ClientUtil.class,
+			"FIDO authenticating to " + serverName + " as user '" + name + "'");
+		return true;
 	}
 
 	static boolean processSSHSignatureCallback(Callback[] callbacks, String serverName,

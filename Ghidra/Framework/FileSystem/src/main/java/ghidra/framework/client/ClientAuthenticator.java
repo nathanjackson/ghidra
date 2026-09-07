@@ -16,11 +16,13 @@
 package ghidra.framework.client;
 
 import java.awt.Component;
+import java.io.IOException;
 import java.net.Authenticator;
 
 import javax.security.auth.callback.*;
 
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.FidoAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.security.KeyStorePasswordProvider;
 
@@ -88,5 +90,17 @@ public interface ClientAuthenticator extends KeyStorePasswordProvider {
 	 */
 	public boolean processSSHSignatureCallbacks(String serverName, NameCallback nameCb,
 			SSHSignatureCallback sshCb);
+
+	/**
+	 * Process Ghidra Server FIDO2 authentication callbacks.
+	 * @param nameCb provides storage for user login name. A null indicates
+	 * that the default user name will be used, @see ClientUtil#getUserName().
+	 * @param fidoCb FIDO2 callback to fill with assertion or attestation
+	 * @param serverName name of server
+	 * @return true if authentication data provided, false if cancelled
+	 * @throws IOException if the FIDO helper or authenticator fails
+	 */
+	public boolean processFidoCallback(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
+			String serverName) throws IOException;
 
 }
