@@ -57,8 +57,8 @@ public interface GhidraServerHandle extends Remote {
 	 *       supports older clients back to interface version 11.  Server may now BIND
 	 *       to the RMI registery with two different names if needed.
 	 *   14: Added FidoAuthenticationCallback for FIDO2 (rpId, challenge, allowCredentials,
-	 *       enroll, assertion/attestation).  Server still supports older clients back to
-	 *       interface version 11.
+	 *       enroll, assertion/attestation) and GhidraServerHandle.getFidoAllowCredentials.
+	 *       Server still supports older clients back to interface version 11.
 	 */
 
 	/**
@@ -133,6 +133,17 @@ public interface GhidraServerHandle extends Remote {
 	 * required.
 	 */
 	Callback[] getAuthenticationCallbacks() throws RemoteException;
+
+	/**
+	 * Return FIDO2 credential ids the client may pass to the authenticator as
+	 * allowCredentials for {@code username}.  Unknown users and users with no
+	 * credentials both return an empty array.
+	 *
+	 * @param username login name
+	 * @return copy of credential id byte arrays; never null
+	 * @throws RemoteException if a remote error occurs
+	 */
+	byte[][] getFidoAllowCredentials(String username) throws RemoteException;
 
 	/**
 	 * Get a handle to the repository server.

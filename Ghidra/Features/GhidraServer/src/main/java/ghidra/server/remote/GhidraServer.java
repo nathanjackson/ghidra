@@ -92,7 +92,8 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 		PASSWORD_FILE_LOGIN("Password File"),
 		KRB5_AD_LOGIN("Active Directory via Kerberos"),
 		PKI_LOGIN("PKI"),
-		JAAS_LOGIN("JAAS");
+		JAAS_LOGIN("JAAS"),
+		FIDO_LOGIN("FIDO2");
 
 		private String description;
 
@@ -111,6 +112,7 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 				case 1: return KRB5_AD_LOGIN;
 				case 2: return PKI_LOGIN;
 				case 4: return JAAS_LOGIN;
+				case 5: return FIDO_LOGIN; // "FIDO2"
 				default: return null;
 			}
 			//@formatter:on
@@ -163,6 +165,10 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 		}
 
 		if (allowAnonymousAccess) {
+			if (authMode == FIDO_LOGIN) {
+				throw new IllegalArgumentException(
+					"Anonymous access is not allowed with FIDO authentication");
+			}
 			anonymousAuthModule = new AnonymousAuthenticationModule();
 		}
 
@@ -196,6 +202,14 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 				}
 				authModule = new Krb5ActiveDirectoryAuthenticationModule(loginDomain,
 					allowUserToSpecifyName);
+				break;
+			case FIDO_LOGIN:
+				if (altSSHLoginAllowed) {
+					log.warn("SSH authentication option ignored when FIDO authentication used");
+					altSSHLoginAllowed = false;
+				}
+				authModule = new FidoAuthenticationModule(
+					FidoAuthenticationModule.resolveDefaultRpId());
 				break;
 			default:
 				throw new IllegalArgumentException("Unsupported Authentication mode: " + authMode);
@@ -243,6 +257,22 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 		catch (Throwable t) {
 			log.error("Failed to generate authentication callbacks", t);
 			throw new RemoteException("Failed to generate authentication callbacks");
+		}
+	}
+
+	@Override
+	public byte[][] getFidoAllowCredentials(String username) throws RemoteException {
+		log.info("FIDO allowCredentials requested by " + RepositoryManager.getRMIClient());
+		try {
+			if (!(authModule instanceof FidoAuthenticationModule)) {
+				return new byte[0][];
+			}
+			return ((FidoAuthenticationModule) authModule).getAllowCredentials(mgr.getUserManager(),
+				username);
+		}
+		catch (Throwable t) {
+			log.error("Failed to get FIDO allowCredentials", t);
+			return new byte[0][];
 		}
 	}
 
@@ -744,6 +774,11 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 			}
 		}
 
+		if (authMode == FIDO_LOGIN && allowAnonymousAccess) {
+			displayUsage("Anonymous access is not allowed with FIDO authentication (-a5)");
+			System.exit(-1);
+		}
+
 		try {
 			serverRoot = serverRoot.getCanonicalFile();
 		}
@@ -841,7 +876,11 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 					(defaultPasswordExpiration == 0 ? "disabled"
 							: (defaultPasswordExpiration + " days")));
 			}
-			if (authMode != PKI_LOGIN) {
+			if (authMode == FIDO_LOGIN) {
+				log.info("   Prompt for user ID: yes");
+				log.info("   FIDO RP ID: " + FidoAuthenticationModule.resolveDefaultRpId());
+			}
+			else if (authMode != PKI_LOGIN) {
 				log.info("   Prompt for user ID: " + (nameCallbackAllowed ? "yes" : "no"));
 			}
 			if (altSSHLoginAllowed) {
