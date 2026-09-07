@@ -68,8 +68,19 @@ public class ServerTestUtil {
 		"CN=Ghidra Test Server, O=Ghidra, OU=Test, C=US";
 	public static final String TEST_PKI_CA_DN = "CN=Ghidra Test CA, O=Ghidra, OU=Test, C=US";
 
-	private static String[] AUTH_MODES =
-		new String[] { "Private Password", "NT Login Password", "PKI", "NT/Private Password" };
+	private static final String[] AUTH_MODES = new String[] { "Private Password",
+		"NT Login Password", "PKI", "NT/Private Password", "JAAS", "FIDO2" };
+
+	private static String authModeName(int authMode) {
+		if (authMode < 0) {
+			return "None";
+		}
+		if (authMode < AUTH_MODES.length && AUTH_MODES[authMode] != null &&
+			!AUTH_MODES[authMode].isEmpty()) {
+			return AUTH_MODES[authMode];
+		}
+		return Integer.toString(authMode);
+	}
 
 	public static final URL TEST_REPO_URL =
 		GhidraURL.makeURL(LOCALHOST, GHIDRA_TEST_SERVER_PORT, "Test");
@@ -302,7 +313,7 @@ public class ServerTestUtil {
 	 * @param testRepositoryArchiveZipPath zip resource path to an archive
 	 * containing the contents of a server repository
 	 * @param port RMI registry port, 0 indicates that default port should be used
-	 * @param authMode primary authentication mode (0-3, -1=None, see GhidraServer)
+	 * @param authMode primary authentication mode (-1=None, 0-5 see GhidraServer; 5=FIDO2)
 	 * @param enableAltLoginName if true alternate login name will be 
 	 * enabled for those modes which support it.
 	 * @param enableSSHAuthentication enable SSH authentication if true
@@ -410,7 +421,7 @@ public class ServerTestUtil {
 	 * This server must be disposed before attempting to create another.
 	 * @param dirPath server root directory
 	 * @param port RMI registry port, 0 indicates that default port should be used
-	 * @param authMode authentication mode (-1 for no authentication)
+	 * @param authMode authentication mode (-1 for no authentication; 5 for FIDO2)
 	 * @param enableAltLoginName if true enable alternate login name
 	 * @param enableSSHAuthentication if true SSH authentication will be enabled
 	 * @param enableAnonymousAuthentication if true anonymous usage is allowed
@@ -428,8 +439,7 @@ public class ServerTestUtil {
 		}
 
 		Msg.debug(ServerTestUtil.class, "--- Preparing to start Ghidra Server ---");
-		Msg.debug(ServerTestUtil.class,
-			"     Authentication: " + (authMode < 0 ? "None" : AUTH_MODES[authMode]));
+		Msg.debug(ServerTestUtil.class, "     Authentication: " + authModeName(authMode));
 		Msg.debug(ServerTestUtil.class, "     Enable Alternate Login Name: " + enableAltLoginName);
 		Msg.debug(ServerTestUtil.class,
 			"     Enable Anonymous Login: " + enableAnonymousAuthentication);
