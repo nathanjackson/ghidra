@@ -235,9 +235,11 @@ The Ghidra Server has been designed to support many  possible user authenticatio
 
   Enrollment is a separate step. Issue a one-time enroll token with
   `svrAdmin -fido-enroll <user_sid>` (expires in 15 minutes). The user then signs in from the Ghidra
-  GUI (paste the token) or Headless Analyzer (`GHIDRA_FIDO_ENROLL_TOKEN`). List credentials with
-  `svrAdmin -fido-list <user_sid>`. Revoke one credential, or all credentials and any pending enroll
-  token, with `svrAdmin -fido-revoke <user_sid> [credentialId]`.
+  GUI (paste the token) or Headless Analyzer (`GHIDRA_FIDO_ENROLL_TOKEN`). That environment variable
+  appears in the process list and child environments; prefer the GUI paste field. Headless PIN entry
+  should use the console prompt rather than `GHIDRA_FIDO_PIN` on the command line. List credentials
+  with `svrAdmin -fido-list <user_sid>`. Revoke one credential, or all credentials and any pending
+  enroll token, with `svrAdmin -fido-revoke <user_sid> [credentialId]`.
 
   Linux clients need extra udev rules only if FIDO2 security keys have never worked in a browser on
   that machine. A fallback snippet is shipped as
@@ -613,6 +615,9 @@ svrAdmin -users
 Issues a one-time FIDO2 enrollment code for an existing user. The code expires in 15 minutes. Give
 the code to the user; they paste it in the Ghidra FIDO sign-in dialog, or set
 `GHIDRA_FIDO_ENROLL_TOKEN` for Headless Analyzer, then touch their security key.
+`GHIDRA_FIDO_ENROLL_TOKEN` appears in the process environment (visible to other processes on the
+same machine) and is inherited by children. Prefer the GUI paste field. Do not put the token on the
+analyzeHeadless command line.
 
 Example:
 ```bash

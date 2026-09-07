@@ -368,8 +368,10 @@ password. __If the terminal in use is unable to suppress echoing an entered pass
 be issued with the prompt, and the entered password will be echoed to the terminal. Use of this 
 option is discouraged when such a warning occurs.__
 
-This option is not used when the Ghidra Server uses FIDO2 authentication (`-a5`). The security-key
-PIN is read from `GHIDRA_FIDO_PIN` or prompted on the console.
+This option is not used when the Ghidra Server uses FIDO2 authentication (`-a5`). Prefer the
+interactive console PIN prompt. `GHIDRA_FIDO_PIN` may be set instead, but it appears in the process
+environment (visible to other processes on the same machine) and is inherited by children. Do not
+pass the PIN on the command line (for example `GHIDRA_FIDO_PIN=... analyzeHeadless ...`).
 
 [See here for more information regarding which authentication method to use](#authentication).
 
@@ -470,8 +472,12 @@ a suitable SSH key while avoiding the unsupported OpenSSH format: `ssh-keygen -b
 When the Ghidra Server uses FIDO2 authentication (`-a5`), Headless Analyzer runs the platform
 `ghidra-fido` helper and prints `Touch your security key` to `stderr`. A security key must be
 present. The login user ID comes from [`-connect`][connect] when specified, otherwise the process
-owner. Optional enrollment uses `GHIDRA_FIDO_ENROLL_TOKEN`. The security-key PIN is read from
-`GHIDRA_FIDO_PIN`, or prompted on the console when one is available. [`-p`][password] is not used.
+owner. Optional enrollment uses `GHIDRA_FIDO_ENROLL_TOKEN`. Prefer the interactive console PIN
+prompt; `GHIDRA_FIDO_PIN` may be set instead. [`-p`][password] is not used.
+
+`GHIDRA_FIDO_PIN` and `GHIDRA_FIDO_ENROLL_TOKEN` appear in the process environment (visible to
+other processes on the same machine, including `ps e` and `/proc/<pid>/environ`) and are inherited
+by child processes. Do not pass the PIN on the command line.
 
 Batch, script, and CI use without a security key is not supported.
 
