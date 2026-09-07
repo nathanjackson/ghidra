@@ -11,6 +11,7 @@
 * _Importer:COFF_. Implemented the COFF `IMAGE_REL_ARM64_ADDR64` relocation. (GP-7088, Issue #9408)
 * _Importer:Mach-O_. Provided safer parsing of `dyld_shared_cache` files. (GP-7046)
 * _Logging_. Upgraded log4j to version 2.26.1. (GP-7134)
+* _Multi-User_. Added Ghidra Server FIDO2 authentication mode (`-a5`) with GUI and Headless Analyzer helper login. (GH-XXXX)
 * _Multi-User_. Corrected potential network performance issue related to Ghidra Server use.  Full benefit requires update of both Ghidra Server installation and Ghidra client software. (GP-7012, Issue #2752, #9316)
 * _Processors_. Made SparcV9 register display formatting more consistent. (GP-941)
 * _Scripting_. Updated the Structure Editor to perform a structure reload when the structure's description is changed outside of the editor. (GP-7118, Issue #9461)

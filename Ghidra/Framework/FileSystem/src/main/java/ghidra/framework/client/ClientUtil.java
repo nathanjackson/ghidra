@@ -511,6 +511,9 @@ public class ClientUtil {
 		if (clientAuthenticator instanceof DefaultClientAuthenticator defaultAuth) {
 			ok = defaultAuth.processFidoCallback(nameCb, fidoCb, serverName, lookup, loginError);
 		}
+		else if (clientAuthenticator instanceof HeadlessClientAuthenticator headlessAuth) {
+			ok = headlessAuth.processFidoCallback(nameCb, fidoCb, serverName, lookup);
+		}
 		else {
 			ok = clientAuthenticator.processFidoCallback(nameCb, fidoCb, serverName);
 		}

@@ -1,6 +1,7 @@
 ##VERSION: 2.0
 Module.manifest||GHIDRA||||END|
 README.md||GHIDRA||||END|
+data/70-ghidra-fido.rules||GHIDRA||||END|
 data/client.rmi.serial.filter||GHIDRA||||END|
 data/serialFilterREADME.md||GHIDRA||||END|
 src/main/java/ghidra/framework/client/package.html||GHIDRA||reviewed||END|

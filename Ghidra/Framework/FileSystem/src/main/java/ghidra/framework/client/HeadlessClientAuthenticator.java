@@ -19,11 +19,15 @@ import java.awt.Component;
 import java.io.*;
 import java.net.*;
 import java.security.InvalidKeyException;
+import java.util.Arrays;
+import java.util.function.Function;
 
 import javax.security.auth.callback.*;
 
 import org.apache.commons.lang3.StringUtils;
 
+import ghidra.framework.client.fido.FidoAllowCredentialsLookup;
+import ghidra.framework.client.fido.FidoAuthenticator;
 import ghidra.framework.remote.AnonymousCallback;
 import ghidra.framework.remote.FidoAuthenticationCallback;
 import ghidra.framework.remote.SSHSignatureCallback;
@@ -39,9 +43,16 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 
 	private final static char[] BADPASSWORD = "".toCharArray();
 
+	static final String FIDO_ENROLL_TOKEN_ENV = "GHIDRA_FIDO_ENROLL_TOKEN";
+	static final String FIDO_PIN_ENV = "GHIDRA_FIDO_PIN";
+	static final String FIDO_TOUCH_PROMPT = "Touch your security key";
+
 	private static Object sshPrivateKey;
 	private static String preferredName = null;
 	private static boolean passwordPromptAllowed;
+
+	private final FidoAuthenticator fidoAuthenticator;
+	private final Function<String, String> envLookup;
 
 	/**
 	 * Simple authentication handler using a default authenticator which may be passed to
@@ -103,6 +114,17 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 	};
 
 	HeadlessClientAuthenticator() {
+		this(new FidoAuthenticator(), System::getenv);
+	}
+
+	HeadlessClientAuthenticator(FidoAuthenticator fidoAuthenticator) {
+		this(fidoAuthenticator, System::getenv);
+	}
+
+	HeadlessClientAuthenticator(FidoAuthenticator fidoAuthenticator,
+			Function<String, String> envLookup) {
+		this.fidoAuthenticator = fidoAuthenticator;
+		this.envLookup = envLookup;
 	}
 
 	@Override
@@ -365,8 +387,87 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 	@Override
 	public boolean processFidoCallback(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
 			String serverName) throws IOException {
-		throw new IOException(
-			"FIDO authentication requires the GUI client. Headless FIDO login is not supported in this release.");
+		return processFidoCallback(nameCb, fidoCb, serverName, null);
+	}
+
+	boolean processFidoCallback(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
+			String serverName, FidoAllowCredentialsLookup allowLookup) throws IOException {
+		if (fidoCb == null) {
+			throw new IOException("FIDO authentication callback required");
+		}
+		String userName = resolveFidoUserName(nameCb);
+		if (StringUtils.isBlank(userName)) {
+			throw new IOException("User ID is required");
+		}
+		String enrollToken = envValue(FIDO_ENROLL_TOKEN_ENV);
+		char[] pin = resolveFidoPin();
+		try {
+			System.err.println(FIDO_TOUCH_PROMPT);
+			System.err.flush();
+			byte[][] allow = allowCredentials(userName, fidoCb, allowLookup);
+			fidoAuthenticator.complete(fidoCb, userName, enrollToken, allow, pin);
+			return true;
+		}
+		catch (IOException e) {
+			Msg.error(this, e.getMessage());
+			throw e;
+		}
+		finally {
+			if (pin != null) {
+				Arrays.fill(pin, '\0');
+			}
+		}
+	}
+
+	private String resolveFidoUserName(NameCallback nameCb) {
+		String userName = preferredName;
+		if (StringUtils.isBlank(userName) && nameCb != null) {
+			userName = nameCb.getName();
+			if (StringUtils.isBlank(userName)) {
+				userName = nameCb.getDefaultName();
+			}
+		}
+		if (StringUtils.isBlank(userName)) {
+			userName = ClientUtil.getUserName();
+		}
+		if (nameCb != null) {
+			nameCb.setName(userName);
+		}
+		return userName;
+	}
+
+	private char[] resolveFidoPin() {
+		String fromEnv = envLookup.apply(FIDO_PIN_ENV);
+		if (!StringUtils.isBlank(fromEnv)) {
+			return fromEnv.toCharArray();
+		}
+		Console cons = System.console();
+		if (cons == null) {
+			return null;
+		}
+		System.err.print("Security key PIN: ");
+		System.err.flush();
+		return cons.readPassword();
+	}
+
+	private String envValue(String name) {
+		String value = envLookup.apply(name);
+		if (StringUtils.isBlank(value)) {
+			return null;
+		}
+		return value.trim();
+	}
+
+	private static byte[][] allowCredentials(String userName, FidoAuthenticationCallback fidoCb,
+			FidoAllowCredentialsLookup allowLookup) throws IOException {
+		if (allowLookup != null) {
+			byte[][] ids = allowLookup.getAllowCredentials(userName);
+			if (ids != null) {
+				return ids;
+			}
+		}
+		byte[][] fromCb = fidoCb.getAllowCredentials();
+		return fromCb == null ? new byte[0][] : fromCb;
 	}
 
 }

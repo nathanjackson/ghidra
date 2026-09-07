@@ -227,6 +227,23 @@ The Ghidra Server has been designed to support many  possible user authenticatio
     the `-a1` Active Directory via Kerberos authentication mode, and as such you should use it that 
     way.  
 		
+* __FIDO2 security key (-a5)__: User authentication is performed with a FIDO2/WebAuthn security key.
+  The WebAuthn relying-party ID is the hostname published by `-ip` (`java.rmi.server.hostname`).
+  Set `-ip` to a stable hostname clients use to reach the server. Anonymous access (`-anonymous`) is
+  not allowed. SSH authentication (`-ssh`) is ignored. Users must still be added with
+  `svrAdmin -add` before they can enroll a key.
+
+  Enrollment is a separate step. Issue a one-time enroll token with
+  `svrAdmin -fido-enroll <user_sid>` (expires in 15 minutes). The user then signs in from the Ghidra
+  GUI (paste the token) or Headless Analyzer (`GHIDRA_FIDO_ENROLL_TOKEN`). List credentials with
+  `svrAdmin -fido-list <user_sid>`. Revoke one credential, or all credentials and any pending enroll
+  token, with `svrAdmin -fido-revoke <user_sid> [credentialId]`.
+
+  Linux clients need extra udev rules only if FIDO2 security keys have never worked in a browser on
+  that machine. A fallback snippet is shipped as
+  `Ghidra/Framework/FileSystem/data/70-ghidra-fido.rules`. Copy it to `/etc/udev/rules.d/` and
+  reload udev if needed. Do not install it if Chrome or Firefox can already use the key.
+
 * __Use of an SSH pre-shared key (-ssh</)__: Supported as an alternate form of authentication when 
   using Local Ghidra password (`-a0`). This SSH authentication is currently supported by the 
   Headless Analyzer only. See [SSH User Authentication](#ssh-user-authentication) for configuration
@@ -267,7 +284,8 @@ IPv4 address, if this fails the local loopback address is used.  The server log 
 remote access hostname at startup.  This option may be required when a server has multiple IP 
 interfaces, running within a docker container, or relies on a dynamic DNS or other network address 
 translation for incoming connections.  This option establishes the property value for 
-_java.rmi.server.hostname_.  When this option specifies a hostname, and the _-Dghidra.keystore_ JVM 
+_java.rmi.server.hostname_.  When using FIDO2 authentication (`-a5`), this hostname is the WebAuthn
+relying-party ID.  When this option specifies a hostname, and the _-Dghidra.keystore_ JVM 
 property has not been specified, it is generally required that the _-ipAlt_ option be included to 
 specify the IP Address which corresponds to the hostname.
 
@@ -314,7 +332,8 @@ craft their own JAAS configuration directive when using the `-a4` mode.
 
 #### `-u`
 Allows the server login user ID to be specified at time of login for `-a0` authentication mode. 
-Without this option, the users client-side login ID will be assumed.
+Without this option, the users client-side login ID will be assumed. FIDO2 (`-a5`) always prompts
+for user ID.
 
 #### `-autoProvision`
 Enable the auto-creation of new Ghidra Server users when they successfully authenticate to the 
@@ -324,9 +343,11 @@ Directory) will need to be deleted manually from the Ghidra Server using `svrAdm
 #### `-anonymous`
 Enable anonymous access support for Ghidra Server and its repositories.  Only those repositories
 which specifically enable anonymous access will be accessible as read-only to an anonymous user.
+Anonymous access is not allowed with FIDO2 authentication (`-a5`).
 
 #### `-ssh`
-Enable SSH as an alternate form of authentication when using `-a0` authentication mode.
+Enable SSH as an alternate form of authentication when using `-a0` authentication mode. This option
+is ignored with FIDO2 authentication (`-a5`).
 
 ([Back to Top][top])
 
@@ -488,6 +509,9 @@ svrAdmin [<server-root-path>]
          [-list  <user_sid> [<user_sid>...]]
          [-list [--users]]
          [-users]
+         [-fido-enroll <user_sid>]
+         [-fido-list <user_sid>]
+         [-fido-revoke <user_sid> [credentialId]]
          [-migrate-all]
          [-migrate "<repository_name>"]
 ```
@@ -583,6 +607,34 @@ Lists all users with server access.
 Example:
 ```bash
 svrAdmin -users
+```
+
+#### `-fido-enroll` (Issue a FIDO2 Enrollment Token)
+Issues a one-time FIDO2 enrollment code for an existing user. The code expires in 15 minutes. Give
+the code to the user; they paste it in the Ghidra FIDO sign-in dialog, or set
+`GHIDRA_FIDO_ENROLL_TOKEN` for Headless Analyzer, then touch their security key.
+
+Example:
+```bash
+svrAdmin -fido-enroll mySID
+```
+
+#### `-fido-list` (List FIDO2 Credentials)
+Lists FIDO2 credentials and pending enroll-token status for the specified user.
+
+Example:
+```bash
+svrAdmin -fido-list mySID
+```
+
+#### `-fido-revoke` (Revoke FIDO2 Credentials)
+Revokes one FIDO2 credential when `credentialId` is given, or all credentials and any pending enroll
+token when `credentialId` is omitted.
+
+Example:
+```bash
+svrAdmin -fido-revoke mySID
+svrAdmin -fido-revoke mySID <credentialId>
 ```
     
 #### `-migrate-all` (Migrate All Repositories to Use Indexed File-System Storage)

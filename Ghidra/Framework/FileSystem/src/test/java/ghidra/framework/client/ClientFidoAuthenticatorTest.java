@@ -17,7 +17,6 @@ package ghidra.framework.client;
 
 import static org.junit.Assert.*;
 
-import java.io.IOException;
 import java.rmi.RemoteException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -55,18 +54,6 @@ public class ClientFidoAuthenticatorTest extends AbstractGenericTest {
 		FidoAuthenticationCallback fido = newCallback();
 		assertFalse(auth.processFidoCallback(null, fido, "server.example.test"));
 		assertNull(fido.getCredentialId());
-	}
-
-	@Test
-	public void testHeadlessRequiresGui() throws Exception {
-		HeadlessClientAuthenticator auth = new HeadlessClientAuthenticator();
-		try {
-			auth.processFidoCallback(null, newCallback(), "server.example.test");
-			fail("expected IOException");
-		}
-		catch (IOException e) {
-			assertTrue(e.getMessage(), e.getMessage().contains("GUI"));
-		}
 	}
 
 	@Test
@@ -141,7 +128,7 @@ public class ClientFidoAuthenticatorTest extends AbstractGenericTest {
 		}
 	}
 
-	private static class FakeHandle implements GhidraServerHandle {
+	static class FakeHandle implements GhidraServerHandle {
 		private final byte[][] allow;
 
 		FakeHandle(byte[][] allow) {

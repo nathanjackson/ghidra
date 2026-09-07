@@ -355,6 +355,11 @@ If used, allows the process owner's default userID to be overridden with the giv
 connecting to a Ghidra Server. In order to use this parameter, the server must be configured to 
 allow a non-default username (Ghidra server `-u` option).
 
+When the Ghidra Server uses FIDO2 authentication (`-a5`), this option sets the login user ID.
+FIDO2 always prompts for user ID on the server.
+
+[See here for more information regarding which authentication method to use](#authentication).
+
 ### `-p`
 This option may be specified to allow for interactive password prompting when either a specified
 PKI keystore is password protected or the Ghidra Server requires password authentication. 
@@ -362,6 +367,9 @@ This option should not be used during batch operations where a user will be unab
 password. __If the terminal in use is unable to suppress echoing an entered password, a warning will
 be issued with the prompt, and the entered password will be echoed to the terminal. Use of this 
 option is discouraged when such a warning occurs.__
+
+This option is not used when the Ghidra Server uses FIDO2 authentication (`-a5`). The security-key
+PIN is read from `GHIDRA_FIDO_PIN` or prompted on the console.
 
 [See here for more information regarding which authentication method to use](#authentication).
 
@@ -451,13 +459,21 @@ Use this table to figure out which authentication option to use with the Headles
 your Ghidra Server's method of authentication, and the type of analysis operation you are 
 performing.
 
-| Type of Operation        | SSH Without Password* | SSH With Password | PKI Without Password  | PKI With Password                        | Username/Password |
-| ------------------------ | --------------------- | ----------------- | --------------------- | ---------------------------------------- | ----------------- |
-| Interactive Command Line | [-keystore][keystore] | Not Supported     | [-keystore][keystore] | [-keystore][keystore] and [-p][password] | [-p][password]    |
-| Batch/Script Use         | [-keystore][keystore] | Not Supported     | [-keystore][keystore] | Not Supported                            | NotSupported      |
+| Type of Operation        | SSH Without Password* | SSH With Password | PKI Without Password  | PKI With Password                        | Username/Password | FIDO2            |
+| ------------------------ | --------------------- | ----------------- | --------------------- | ---------------------------------------- | ----------------- | ---------------- |
+| Interactive Command Line | [-keystore][keystore] | Not Supported     | [-keystore][keystore] | [-keystore][keystore] and [-p][password] | [-p][password]    | Helper + touch   |
+| Batch/Script Use         | [-keystore][keystore] | Not Supported     | [-keystore][keystore] | Not Supported                            | NotSupported      | Not Supported    |
 
 __*NOTE:__ The use of OpenSSH keys are not supported. The following command can be used to generate
 a suitable SSH key while avoiding the unsupported OpenSSH format: `ssh-keygen -b 2048 -t rsa -m pem`
+
+When the Ghidra Server uses FIDO2 authentication (`-a5`), Headless Analyzer runs the platform
+`ghidra-fido` helper and prints `Touch your security key` to `stderr`. A security key must be
+present. The login user ID comes from [`-connect`][connect] when specified, otherwise the process
+owner. Optional enrollment uses `GHIDRA_FIDO_ENROLL_TOKEN`. The security-key PIN is read from
+`GHIDRA_FIDO_PIN`, or prompted on the console when one is available. [`-p`][password] is not used.
+
+Batch, script, and CI use without a security key is not supported.
 
 ## Examples
 

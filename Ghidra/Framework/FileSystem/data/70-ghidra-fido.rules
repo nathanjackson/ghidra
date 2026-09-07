@@ -1,0 +1,11 @@
+# Fallback udev rules for Ghidra FIDO2 (ghidra-fido / libfido2).
+#
+# Install this file only if FIDO2 security keys have never worked in a browser
+# on this machine. Most desktop Linux systems already grant hidraw access to
+# the seated user (Chrome/Firefox WebAuthn). Do not install this file in that
+# case.
+#
+#   sudo cp 70-ghidra-fido.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", TAG+="uaccess", GROUP="plugdev", MODE="0660"

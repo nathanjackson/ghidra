@@ -23,6 +23,7 @@ Command line parameters:
          4 - JAAS Authentication.  See also -jaas <config_file>
          5 - FIDO2 Authentication.  Relying party ID is java.rmi.server.hostname (set via -ip).
              -anonymous is not allowed.  -ssh is ignored.
+             Enroll/list/revoke keys with svrAdmin -fido-enroll / -fido-list / -fido-revoke.
          
    -d<ad_domain> : the Active Directory domain name.  Example: "-dmydomain.com"
  
