@@ -26,6 +26,8 @@ import ghidra.GhidraApplicationLayout;
 import ghidra.GhidraLaunchable;
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
+import ghidra.server.security.fido.FidoCredential;
+import ghidra.server.security.fido.FidoCredentialStore;
 import ghidra.util.Msg;
 import ghidra.util.NamingUtilities;
 
@@ -121,17 +123,18 @@ public class ServerAdmin implements GhidraLaunchable {
 		boolean migrationConfirmed = false;
 		boolean migrationAbort = false;
 		ArrayList<String> cmdList = new ArrayList<>();
+		ArrayList<String> enrollNotices = new ArrayList<>();
 		int cmdLen = 1;
 		for (; ix < args.length; ix += cmdLen) {
 			boolean queueCmd = true;
-			String pwdHash = null;
+			String commandSuffix = null;
 			switch (args[ix]) {
 				case CommandProcessor.ADD_USER_COMMAND:  // add user
 					cmdLen = 2;
 					validateSID(args, ix + 1);
 					if (hasOptionalArg(args, ix + 2, CommandProcessor.PASSWORD_OPTION)) {
 						++cmdLen;
-						pwdHash = promptForPasswordAndGetSaltedHash(args[ix + 1]);
+						commandSuffix = promptForPasswordAndGetSaltedHash(args[ix + 1]);
 					}
 					break;
 				case CommandProcessor.REMOVE_USER_COMMAND: // remove user
@@ -143,7 +146,7 @@ public class ServerAdmin implements GhidraLaunchable {
 					validateSID(args, ix + 1);
 					if (hasOptionalArg(args, ix + 2, CommandProcessor.PASSWORD_OPTION)) {
 						++cmdLen;
-						pwdHash = promptForPasswordAndGetSaltedHash(args[ix + 1]);
+						commandSuffix = promptForPasswordAndGetSaltedHash(args[ix + 1]);
 					}
 					break;
 				case CommandProcessor.SET_USER_DN_COMMAND: // set/add user with DN for PKI
@@ -211,12 +214,32 @@ public class ServerAdmin implements GhidraLaunchable {
 						}
 					}
 					break;
+				case CommandProcessor.FIDO_ENROLL_COMMAND:
+					cmdLen = 2;
+					validateSID(args, ix + 1);
+					requireKnownUser(serverRootDir, args[ix + 1]);
+					commandSuffix = buildFidoEnrollSuffix(args[ix + 1], enrollNotices);
+					break;
+				case CommandProcessor.FIDO_LIST_COMMAND:
+					queueCmd = false;
+					cmdLen = 2;
+					validateSID(args, ix + 1);
+					listFido(serverRootDir, args[ix + 1]);
+					break;
+				case CommandProcessor.FIDO_REVOKE_COMMAND:
+					cmdLen = 2;
+					validateSID(args, ix + 1);
+					requireKnownUser(serverRootDir, args[ix + 1]);
+					if (hasOptionalCredentialId(args, ix + 2)) {
+						++cmdLen;
+					}
+					break;
 				default:
 					displayUsage("Invalid usage!");
 					System.exit(-1);
 			}
 			if (queueCmd) {
-				addCommand(cmdList, args, ix, cmdLen, pwdHash);
+				addCommand(cmdList, args, ix, cmdLen, commandSuffix);
 			}
 		}
 
@@ -229,6 +252,9 @@ public class ServerAdmin implements GhidraLaunchable {
 				System.exit(-1);
 			}
 			System.out.println("Command queued.");
+			for (String notice : enrollNotices) {
+				System.out.println(notice);
+			}
 		}
 
 		if (listUsers) {
@@ -433,6 +459,95 @@ public class ServerAdmin implements GhidraLaunchable {
 	}
 
 	/**
+	 * Fail closed if {@code sid} is not already in the server user list.
+	 * @param serverRootDir repositories root
+	 * @param sid user name
+	 */
+	private void requireKnownUser(File serverRootDir, String sid) {
+		try {
+			if (!UserManager.getUsers(serverRootDir).contains(sid)) {
+				System.err.println("User not found: " + sid);
+				System.exit(-1);
+			}
+		}
+		catch (IOException e) {
+			System.err.println("Failed to read user file: " + e.getMessage());
+			System.exit(-1);
+		}
+	}
+
+	/**
+	 * Optional credential id for {@code -fido-revoke}: next arg exists and is not a switch.
+	 * @param args command line args
+	 * @param argOffset index of optional credential id
+	 * @return true if a credential id argument is present
+	 */
+	private boolean hasOptionalCredentialId(String[] args, int argOffset) {
+		return argOffset < args.length && !args[argOffset].startsWith("-");
+	}
+
+	/**
+	 * Generate a one-time enroll code, record a notice for stdout after the command
+	 * is queued, and return {@code <hash> <expiry>} to append to the queued command.
+	 * @param sid user name
+	 * @param enrollNotices notices printed after a successful queue
+	 * @return command suffix containing the token hash and expiry
+	 */
+	private String buildFidoEnrollSuffix(String sid, List<String> enrollNotices) {
+		String token = FidoCredentialStore.generateEnrollToken();
+		String hash = FidoCredentialStore.hashEnrollToken(token);
+		long expiresEpochMs =
+			System.currentTimeMillis() + FidoCredentialStore.DEFAULT_ENROLL_TTL_MS;
+		StringBuilder notice = new StringBuilder();
+		notice.append('\n');
+		notice.append("==================================================\n");
+		notice.append("FIDO enrollment code for user '").append(sid).append("':\n");
+		notice.append("  ").append(token).append('\n');
+		notice.append("Give this one-time code to the user. It expires in 15 minutes.\n");
+		notice.append("==================================================");
+		enrollNotices.add(notice.toString());
+		return hash + " " + expiresEpochMs;
+	}
+
+	/**
+	 * Print FIDO credentials and enroll-token status for {@code sid}.
+	 * @param serverRootDir repositories root
+	 * @param sid user name
+	 */
+	private void listFido(File serverRootDir, String sid) {
+		FidoCredentialStore store = new FidoCredentialStore(serverRootDir);
+		try {
+			if (!UserManager.getUsers(serverRootDir).contains(sid)) {
+				System.err.println("User not found: " + sid);
+				return;
+			}
+			System.out.println("\nFIDO credentials for user '" + sid + "':");
+			List<FidoCredential> credentials = store.loadCredentials(sid);
+			if (credentials.isEmpty()) {
+				System.out.println("  <none>");
+			}
+			else {
+				for (FidoCredential credential : credentials) {
+					String aaguid = credential.getAaguid() != null ? credential.getAaguid() : "-";
+					System.out.println("  credentialId=" + credential.getCredentialId() +
+						" aaguid=" + aaguid + " createdEpochMs=" + credential.getCreatedEpochMs() +
+						" signCount=" + credential.getSignCount());
+				}
+			}
+			if (store.hasPendingEnrollToken(sid)) {
+				long expiry = store.getPendingEnrollExpiryEpochMs(sid);
+				System.out.println("  enroll token: pending (expiresEpochMs=" + expiry + ")");
+			}
+			else {
+				System.out.println("  enroll token: none");
+			}
+		}
+		catch (IOException e) {
+			System.err.println("Failed to list FIDO credentials: " + e.getMessage());
+		}
+	}
+
+	/**
 	 * Validate repository permission arg (repository name to follow)
 	 * @param args command args
 	 * @param i argument index
@@ -568,6 +683,15 @@ public class ServerAdmin implements GhidraLaunchable {
 		System.err.println("      Output list of repository permissions for each user specified");
 		System.err.println("  -users");
 		System.err.println("      Output list of users to console which have server access");
+		System.err.println("  -fido-enroll <sid>");
+		System.err.println(
+			"      Issue a one-time FIDO enrollment code for an existing user (expires in 15 minutes)");
+		System.err.println("  -fido-list <sid>");
+		System.err.println(
+			"      List FIDO credentials and pending enroll-token status for the specified user");
+		System.err.println("  -fido-revoke <sid> [credentialId]");
+		System.err.println(
+			"      Revoke one FIDO credential, or all credentials and any pending enroll token if credentialId is omitted");
 		System.err.println("  -migrate \"<repository-name>\"");
 		System.err.println(
 			"      Migrate the specified repository to the latest file system storage schema (see svrREADME.html)");

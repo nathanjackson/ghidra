@@ -28,6 +28,7 @@ import org.apache.logging.log4j.Logger;
 import generic.hash.HashUtilities;
 import ghidra.framework.remote.User;
 import ghidra.framework.store.local.LocalFileSystem;
+import ghidra.server.security.fido.FidoCredentialStore;
 import ghidra.util.NumericUtilities;
 import ghidra.util.exception.DuplicateNameException;
 
@@ -59,6 +60,7 @@ public class UserManager {
 
 	private final File userFile;
 	private final File sshDir;
+	private final FidoCredentialStore fidoStore;
 
 	private boolean enableLocalPasswords;
 	private long defaultPasswordExpirationMS;
@@ -119,6 +121,15 @@ public class UserManager {
 
 		sshDir = new File(repositoryMgr.getRootDir(), SSH_KEY_FOLDER);
 		initSSH();
+
+		fidoStore = new FidoCredentialStore(repositoryMgr.getRootDir());
+	}
+
+	/**
+	 * {@return the FIDO credential store for this server}
+	 */
+	public FidoCredentialStore getFidoCredentialStore() {
+		return fidoStore;
 	}
 
 	private void initSSH() {
@@ -455,6 +466,7 @@ public class UserManager {
 				}
 				writeUserList();
 				repositoryMgr.userRemoved(username);
+				fidoStore.removeAll(username);
 				log.info("User removed from server: " + username);
 				return true;
 			}

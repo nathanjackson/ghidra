@@ -26,6 +26,7 @@ import org.apache.logging.log4j.Logger;
 
 import ghidra.framework.remote.User;
 import ghidra.framework.store.local.LocalFileSystem;
+import ghidra.server.security.fido.FidoCredentialStore;
 import ghidra.util.exception.DuplicateNameException;
 import utilities.util.FileUtilities;
 
@@ -44,6 +45,9 @@ public class CommandProcessor {
 	static final String SET_USER_DN_COMMAND = "-dn";
 	static final String GRANT_USER_COMMAND = "-grant";
 	static final String REVOKE_USER_COMMAND = "-revoke";
+	static final String FIDO_ENROLL_COMMAND = "-fido-enroll";
+	static final String FIDO_LIST_COMMAND = "-fido-list";
+	static final String FIDO_REVOKE_COMMAND = "-fido-revoke";
 
 	static final String PASSWORD_OPTION = "--p"; // applies to add and reset commands
 
@@ -205,6 +209,48 @@ public class CommandProcessor {
 					return;
 				}
 				rep.removeUser(sid);
+				break;
+			case FIDO_ENROLL_COMMAND:
+				sid = args[1];
+				if (!userMgr.isValidUser(sid)) {
+					log.error("Failed to issue FIDO enroll token for '" + sid +
+						"', user has not been added to server.");
+					return;
+				}
+				if (args.length < 4) {
+					log.error("Failed to process FIDO enroll command; missing hash or expiry");
+					return;
+				}
+				String tokenHash = args[2];
+				long expiresEpochMs;
+				try {
+					expiresEpochMs = Long.parseLong(args[3]);
+				}
+				catch (NumberFormatException e) {
+					log.error("Failed to process FIDO enroll command; invalid expiry: " + args[3]);
+					return;
+				}
+				userMgr.getFidoCredentialStore().issueEnrollTokenHash(sid, tokenHash,
+					expiresEpochMs);
+				log.info("FIDO enroll token issued for user '" + sid + "'");
+				break;
+			case FIDO_REVOKE_COMMAND:
+				sid = args[1];
+				FidoCredentialStore fidoStore = userMgr.getFidoCredentialStore();
+				if (args.length >= 3) {
+					String credentialId = args[2];
+					if (!fidoStore.removeCredential(sid, credentialId)) {
+						log.info("FIDO credential not found for user '" + sid + "': " +
+							credentialId);
+					}
+					else {
+						log.info("FIDO credential revoked for user '" + sid + "'");
+					}
+				}
+				else {
+					fidoStore.removeAll(sid);
+					log.info("All FIDO credentials revoked for user '" + sid + "'");
+				}
 				break;
 			default:
 				log.error("Failed to process unrecognized command: " + args[0]);
