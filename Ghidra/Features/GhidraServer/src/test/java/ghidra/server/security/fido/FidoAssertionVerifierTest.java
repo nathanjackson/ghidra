@@ -234,6 +234,91 @@ public class FidoAssertionVerifierTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testRpIdNormalizedToLowercase() {
+		FidoAssertionVerifier mixed = new FidoAssertionVerifier("LocalHost");
+		assertEquals("localhost", mixed.getRpId());
+	}
+
+	@Test
+	public void testClientDataJsonTooLarge() throws Exception {
+		byte[] huge = new byte[5000];
+		Arrays.fill(huge, (byte) '[');
+		byte[] authData = FidoWebAuthnFixtures.authenticatorData(RP_ID,
+			FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV, 1);
+		try {
+			verifier.verifyAssertion(CHALLENGE, authData, huge, new byte[] { 1 }, cose, 0);
+			fail("expected VerificationException");
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage().contains("too large") ||
+				e.getMessage().contains("clientDataJSON"));
+		}
+	}
+
+	@Test
+	public void testClientDataJsonNonObject() throws Exception {
+		byte[] authData = FidoWebAuthnFixtures.authenticatorData(RP_ID,
+			FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV, 1);
+		try {
+			verifier.verifyAssertion(CHALLENGE, authData, "[]".getBytes(), new byte[] { 1 }, cose,
+				0);
+			fail("expected VerificationException");
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage().contains("clientDataJSON"));
+		}
+	}
+
+	@Test
+	public void testEnrollUnknownFmt() throws Exception {
+		expectAttestationReject(FidoWebAuthnFixtures.attestationFmt(enrollAuthData(), "tpm"),
+			"format");
+	}
+
+	@Test
+	public void testEnrollTrailingCborRejected() throws Exception {
+		byte[] attestation = FidoWebAuthnFixtures.attestationNone(enrollAuthData());
+		expectAttestationReject(FidoWebAuthnFixtures.concat(attestation, new byte[] { 0x00 }),
+			"trailing");
+	}
+
+	@Test
+	public void testEnrollCborTagRejected() throws Exception {
+		byte[] attestation = FidoWebAuthnFixtures.attestationNone(enrollAuthData());
+		byte[] tagged = new byte[attestation.length + 8];
+		Arrays.fill(tagged, (byte) 0xC0);
+		System.arraycopy(attestation, 0, tagged, 8, attestation.length);
+		expectAttestationReject(tagged, "tag");
+	}
+
+	@Test
+	public void testEnrollNoneRequiresEmptyAttStmt() throws Exception {
+		expectAttestationReject(
+			FidoWebAuthnFixtures.attestationNoneWithStmt(enrollAuthData(), false), "attStmt");
+	}
+
+	@Test
+	public void testEnrollPackedMissingAlg() throws Exception {
+		byte[] authData = enrollAuthData();
+		byte[] clientData =
+			FidoWebAuthnFixtures.clientDataJSON("webauthn.create", CHALLENGE, ORIGIN);
+		byte[] sig = FidoWebAuthnFixtures.signEs256(es256.getPrivate(), authData, clientData);
+		expectAttestationReject(FidoWebAuthnFixtures.attestationPacked(authData, sig, true, false),
+			"algorithm");
+	}
+
+	@Test
+	public void testEnrollPackedBadSignature() throws Exception {
+		byte[] authData = enrollAuthData();
+		byte[] clientData =
+			FidoWebAuthnFixtures.clientDataJSON("webauthn.create", CHALLENGE, ORIGIN);
+		byte[] sig = FidoWebAuthnFixtures.signEs256(es256.getPrivate(), authData, clientData);
+		sig[0] ^= 0x5A;
+		expectAttestationReject(FidoWebAuthnFixtures.attestationPacked(authData, sig, true, true),
+			"signature");
+	}
+
+	@Test
 	public void testP1363ToDerHighBit() throws Exception {
 		byte[] raw = new byte[64];
 		Arrays.fill(raw, 0, 32, (byte) 0xFF);
@@ -243,5 +328,26 @@ public class FidoAssertionVerifierTest extends AbstractGenericTest {
 		assertEquals(0x02, der[2] & 0xff);
 		assertEquals(33, der[3] & 0xff); // leading 0x00 for high-bit r
 		assertEquals(0, der[4]);
+	}
+
+	private byte[] enrollAuthData() {
+		int flags = FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV |
+			FidoAssertionVerifier.FLAG_AT;
+		return FidoWebAuthnFixtures.authenticatorData(RP_ID, flags, 0,
+			FidoWebAuthnFixtures.CRED_ID, cose);
+	}
+
+	private void expectAttestationReject(byte[] attestation, String messageFragment)
+			throws Exception {
+		byte[] clientData =
+			FidoWebAuthnFixtures.clientDataJSON("webauthn.create", CHALLENGE, ORIGIN);
+		try {
+			verifier.verifyAttestation(CHALLENGE, enrollAuthData(), clientData, attestation);
+			fail("expected VerificationException containing " + messageFragment);
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage(),
+				e.getMessage().toLowerCase().contains(messageFragment.toLowerCase()));
+		}
 	}
 }

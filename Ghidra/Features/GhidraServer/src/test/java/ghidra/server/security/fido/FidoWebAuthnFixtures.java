@@ -138,9 +138,15 @@ final class FidoWebAuthnFixtures {
 			boolean es256) throws GeneralSecurityException {
 		byte[] sig = es256 ? signEs256(priv, authData, clientDataJSON)
 				: signRs256(priv, authData, clientDataJSON);
+		return attestationPacked(authData, sig, es256, true);
+	}
+
+	static byte[] attestationPacked(byte[] authData, byte[] sig, boolean es256, boolean includeAlg) {
 		CborWriter stmt = new CborWriter();
-		stmt.map(2);
-		stmt.text("alg").integer(es256 ? -7 : -257);
+		stmt.map(includeAlg ? 2 : 1);
+		if (includeAlg) {
+			stmt.text("alg").integer(es256 ? -7 : -257);
+		}
 		stmt.text("sig").bytes(sig);
 		CborWriter w = new CborWriter();
 		w.map(3);
@@ -148,6 +154,39 @@ final class FidoWebAuthnFixtures {
 		w.text("attStmt").raw(stmt.toByteArray());
 		w.text("authData").bytes(authData);
 		return w.toByteArray();
+	}
+
+	static byte[] attestationNoneWithStmt(byte[] authData, boolean emptyStmt) {
+		CborWriter w = new CborWriter();
+		w.map(3);
+		w.text("fmt").text("none");
+		if (emptyStmt) {
+			w.text("attStmt").map(0);
+		}
+		else {
+			CborWriter stmt = new CborWriter();
+			stmt.map(1);
+			stmt.text("x").integer(1);
+			w.text("attStmt").raw(stmt.toByteArray());
+		}
+		w.text("authData").bytes(authData);
+		return w.toByteArray();
+	}
+
+	static byte[] attestationFmt(byte[] authData, String fmt) {
+		CborWriter w = new CborWriter();
+		w.map(3);
+		w.text("fmt").text(fmt);
+		w.text("attStmt").map(0);
+		w.text("authData").bytes(authData);
+		return w.toByteArray();
+	}
+
+	static byte[] concat(byte[] a, byte[] b) {
+		byte[] out = new byte[a.length + b.length];
+		System.arraycopy(a, 0, out, 0, a.length);
+		System.arraycopy(b, 0, out, a.length, b.length);
+		return out;
 	}
 
 	static byte[] signedMessage(byte[] authenticatorData, byte[] clientDataJSON)

@@ -136,14 +136,18 @@ public interface GhidraServerHandle extends Remote {
 
 	/**
 	 * Return FIDO2 credential ids the client may pass to the authenticator as
-	 * allowCredentials for {@code username}.  Unknown users and users with no
-	 * credentials both return an empty array.
+	 * allowCredentials for {@code username}.  {@code challenge} must be the
+	 * still-valid (unconsumed) challenge from {@link #getAuthenticationCallbacks()}.
+	 * Unknown users, users with no credentials, a missing/stale challenge, and
+	 * error paths all return an empty array.  Given a live challenge, an enrolled
+	 * username is distinguishable because credential ids are returned.
 	 *
 	 * @param username login name
+	 * @param challenge callback challenge bytes; not consumed
 	 * @return copy of credential id byte arrays; never null
 	 * @throws RemoteException if a remote error occurs
 	 */
-	byte[][] getFidoAllowCredentials(String username) throws RemoteException;
+	byte[][] getFidoAllowCredentials(String username, byte[] challenge) throws RemoteException;
 
 	/**
 	 * Get a handle to the repository server.

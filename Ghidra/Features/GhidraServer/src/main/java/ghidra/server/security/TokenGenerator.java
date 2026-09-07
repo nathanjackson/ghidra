@@ -53,9 +53,24 @@ public class TokenGenerator {
 	 * @return true if token is valid and now consumed
 	 */
 	static boolean isValidToken(byte[] token) {
-		if (token.length != TOKEN_SIZE || !tokenCache.consume(token)) {
+		if (token == null || token.length != TOKEN_SIZE || !tokenCache.consume(token)) {
 			return false;
 		}
+		return hasValidTimestamp(token);
+	}
+
+	/**
+	 * {@return true if the token is still cached and unexpired, without consuming it}
+	 * @param token token previously issued
+	 */
+	static boolean hasIssuedToken(byte[] token) {
+		if (token == null || token.length != TOKEN_SIZE || !tokenCache.contains(token)) {
+			return false;
+		}
+		return hasValidTimestamp(token);
+	}
+
+	private static boolean hasValidTimestamp(byte[] token) {
 		long issueTime = getLong(token, 0);
 		if (issueTime <= 0) {
 			return false;
@@ -138,6 +153,14 @@ public class TokenGenerator {
 			Long storedAt = cache.remove(new Token(token)); // remove on retrieval
 			if (storedAt == null)
 				return false;
+			return (System.currentTimeMillis() - storedAt < MAX_TTL_MS);
+		}
+
+		boolean contains(byte[] token) {
+			Long storedAt = cache.get(new Token(token));
+			if (storedAt == null) {
+				return false;
+			}
 			return (System.currentTimeMillis() - storedAt < MAX_TTL_MS);
 		}
 

@@ -304,6 +304,24 @@ public class FidoCredentialStore {
 	 */
 	public synchronized boolean consumeEnrollToken(String username, String plaintext)
 			throws IOException {
+		if (!matchesEnrollToken(username, plaintext)) {
+			return false;
+		}
+		deleteOrThrow(enrollFile(username));
+		return true;
+	}
+
+	/**
+	 * Check a plaintext enroll token without consuming it. Expired tokens are
+	 * deleted and rejected. Wrong tokens do not consume a still-valid token.
+	 * @param username user name/SID
+	 * @param plaintext one-time enroll code
+	 * @return true if the token is present, unexpired, and matches
+	 * @throws IOException if the file cannot be read
+	 * @throws IllegalArgumentException if {@code username} is not a valid user name
+	 */
+	public synchronized boolean matchesEnrollToken(String username, String plaintext)
+			throws IOException {
 		checkUserName(username);
 		File file = enrollFile(username);
 		EnrollTokenRecord record = readEnrollRecord(file);
@@ -317,7 +335,6 @@ public class FidoCredentialStore {
 		if (plaintext == null || !hashesEqual(record.tokenHash, hashEnrollToken(plaintext))) {
 			return false;
 		}
-		deleteOrThrow(file);
 		return true;
 	}
 

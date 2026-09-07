@@ -23,6 +23,7 @@ import java.security.interfaces.RSAPublicKey;
 import java.security.spec.*;
 import java.util.*;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -58,6 +59,9 @@ public class FidoAssertionVerifier {
 	private static final String FMT_NONE = "none";
 	private static final String FMT_PACKED = "packed";
 
+	private static final int MAX_CLIENT_DATA_BYTES = 4096;
+	private static final int MAX_ATTESTATION_BYTES = 8192;
+
 	private final String rpId;
 	private final byte[] rpIdHash;
 
@@ -65,11 +69,29 @@ public class FidoAssertionVerifier {
 	 * @param rpId WebAuthn relying-party id (stable hostname)
 	 */
 	public FidoAssertionVerifier(String rpId) {
+		this.rpId = normalizeRpId(rpId);
+		this.rpIdHash = sha256(this.rpId.getBytes(StandardCharsets.UTF_8));
+	}
+
+	/**
+	 * Lowercase ASCII rpId. Rejects scheme, port, and path. {@code ::1} / {@code [::1]}
+	 * are allowed loopback literals.
+	 * @param rpId candidate relying-party id
+	 * @return normalized rpId
+	 */
+	public static String normalizeRpId(String rpId) {
 		if (rpId == null || rpId.isBlank()) {
 			throw new IllegalArgumentException("rpId is required");
 		}
-		this.rpId = rpId;
-		this.rpIdHash = sha256(rpId.getBytes(StandardCharsets.UTF_8));
+		String n = rpId.trim().toLowerCase(Locale.ROOT);
+		if (n.contains("://") || n.indexOf('/') >= 0 || n.indexOf(' ') >= 0) {
+			throw new IllegalArgumentException("rpId must be a hostname or loopback literal");
+		}
+		int colon = n.indexOf(':');
+		if (colon > 0 && n.indexOf(':', colon + 1) < 0) {
+			throw new IllegalArgumentException("rpId must be a hostname or loopback literal");
+		}
+		return n;
 	}
 
 	/**
@@ -117,10 +139,14 @@ public class FidoAssertionVerifier {
 		if (attestationObject == null || attestationObject.length == 0) {
 			throw new VerificationException("attestation object required");
 		}
+		if (attestationObject.length > MAX_ATTESTATION_BYTES) {
+			throw new VerificationException("attestation object too large");
+		}
 		verifyClientData(clientDataJSON, challenge, TYPE_CREATE);
 
 		CborDecoder decoder = new CborDecoder(attestationObject, 0);
 		Map<Object, Object> attObj = decoder.readMap();
+		decoder.checkConsumed();
 		String fmt = textValue(attObj.get("fmt"));
 		byte[] attAuthData = bytesValue(attObj.get("authData"));
 		if (attAuthData == null) {
@@ -133,7 +159,10 @@ public class FidoAssertionVerifier {
 
 		ParsedAuthData parsed = parseAuthenticatorData(attAuthData, true);
 		if (FMT_NONE.equals(fmt)) {
-			// no attStmt signature for none
+			Map<Object, Object> attStmt = mapValue(attObj.get("attStmt"));
+			if (attStmt == null || !attStmt.isEmpty()) {
+				throw new VerificationException("none attStmt must be empty");
+			}
 		}
 		else if (FMT_PACKED.equals(fmt)) {
 			verifyPackedSelfAttestation(mapValue(attObj.get("attStmt")), attAuthData,
@@ -152,16 +181,17 @@ public class FidoAssertionVerifier {
 			throw new VerificationException("packed attStmt required");
 		}
 		byte[] sig = bytesValue(attStmt.get("sig"));
+		Long alg = longValue(attStmt.get("alg"));
 		if (sig == null) {
 			throw new VerificationException("packed attStmt signature required");
 		}
+		if (alg == null) {
+			throw new VerificationException("packed attStmt algorithm required");
+		}
 		PublicKey publicKey = parseCosePublicKey(publicKeyCose);
-		Long alg = longValue(attStmt.get("alg"));
-		if (alg != null) {
-			int expected = (publicKey instanceof ECPublicKey) ? ALG_ES256 : ALG_RS256;
-			if (alg.intValue() != expected) {
-				throw new VerificationException("packed attStmt algorithm mismatch");
-			}
+		int expected = (publicKey instanceof ECPublicKey) ? ALG_ES256 : ALG_RS256;
+		if (alg.intValue() != expected) {
+			throw new VerificationException("packed attStmt algorithm mismatch");
 		}
 		verifySignature(publicKey, signedMessage(authData, clientDataJSON), sig);
 	}
@@ -171,15 +201,25 @@ public class FidoAssertionVerifier {
 		if (clientDataJSON == null || clientDataJSON.length == 0) {
 			throw new VerificationException("clientDataJSON required");
 		}
+		if (clientDataJSON.length > MAX_CLIENT_DATA_BYTES) {
+			throw new VerificationException("clientDataJSON too large");
+		}
 		if (challenge == null || challenge.length == 0) {
 			throw new VerificationException("challenge required");
 		}
 		JsonObject obj;
 		try {
-			obj = JsonParser.parseString(new String(clientDataJSON, StandardCharsets.UTF_8))
-					.getAsJsonObject();
+			JsonElement element =
+				JsonParser.parseString(new String(clientDataJSON, StandardCharsets.UTF_8));
+			if (element == null || !element.isJsonObject()) {
+				throw new VerificationException("invalid clientDataJSON");
+			}
+			obj = element.getAsJsonObject();
 		}
-		catch (RuntimeException e) {
+		catch (VerificationException e) {
+			throw e;
+		}
+		catch (RuntimeException | StackOverflowError e) {
 			throw new VerificationException("invalid clientDataJSON");
 		}
 		String type = requiredString(obj, "type");
@@ -281,7 +321,9 @@ public class FidoAssertionVerifier {
 		if (cose == null || cose.length == 0) {
 			throw new VerificationException("COSE key required");
 		}
-		Map<Object, Object> map = new CborDecoder(cose, 0).readMap();
+		CborDecoder decoder = new CborDecoder(cose, 0);
+		Map<Object, Object> map = decoder.readMap();
+		decoder.checkConsumed();
 		Long kty = longValue(mapGet(map, COSE_KTY));
 		Long alg = longValue(mapGet(map, COSE_ALG));
 		if (kty == null) {
@@ -532,12 +574,14 @@ public class FidoAssertionVerifier {
 	 * Tiny CBOR decoder for maps of ints/bytes/text used by COSE_Key and attestation objects.
 	 */
 	static final class CborDecoder {
-		private static final int MAX_DEPTH = 4;
-		private static final int MAX_BYTES = 65536;
-		private static final int MAX_ITEMS = 32;
+		private static final int MAX_DEPTH = 2;
+		private static final int MAX_BYTES = 8192;
+		private static final int MAX_ITEMS = 16;
+		private static final int MAX_DECODED_VALUES = 64;
 
 		private final byte[] data;
 		private int offset;
+		private int decodedValues;
 
 		CborDecoder(byte[] data, int offset) {
 			this.data = data;
@@ -546,6 +590,12 @@ public class FidoAssertionVerifier {
 
 		int position() {
 			return offset;
+		}
+
+		void checkConsumed() throws VerificationException {
+			if (offset != data.length) {
+				throw new VerificationException("trailing CBOR");
+			}
 		}
 
 		Map<Object, Object> readMap() throws VerificationException {
@@ -561,6 +611,9 @@ public class FidoAssertionVerifier {
 		private Object read(int depth) throws VerificationException {
 			if (depth > MAX_DEPTH) {
 				throw new VerificationException("CBOR nesting too deep");
+			}
+			if (++decodedValues > MAX_DECODED_VALUES) {
+				throw new VerificationException("CBOR too large");
 			}
 			int ib = readByte();
 			int major = ib >>> 5;
@@ -578,36 +631,27 @@ public class FidoAssertionVerifier {
 					return readExact(toLength(n));
 				case 3:
 					return new String(readExact(toLength(n)), StandardCharsets.UTF_8);
-				case 4: {
-					int len = toCount(n);
-					List<Object> list = new ArrayList<>(len);
-					for (int i = 0; i < len; i++) {
-						list.add(read(depth + 1));
-					}
-					return list;
-				}
+				case 4:
+					throw new VerificationException("unsupported CBOR array");
 				case 5: {
 					int len = toCount(n);
 					Map<Object, Object> map = new LinkedHashMap<>();
 					for (int i = 0; i < len; i++) {
 						Object key = read(depth + 1);
+						if (!(key instanceof Long) && !(key instanceof String)) {
+							throw new VerificationException("unsupported CBOR map key");
+						}
 						Object val = read(depth + 1);
+						if (map.containsKey(key)) {
+							throw new VerificationException("duplicate CBOR map key");
+						}
 						map.put(key, val);
 					}
 					return map;
 				}
 				case 6:
-					return read(depth);
+					throw new VerificationException("unsupported CBOR tag");
 				case 7:
-					if (ai == 20) {
-						return Boolean.FALSE;
-					}
-					if (ai == 21) {
-						return Boolean.TRUE;
-					}
-					if (ai == 22) {
-						return null;
-					}
 					throw new VerificationException("unsupported CBOR simple value");
 				default:
 					throw new VerificationException("unsupported CBOR type");

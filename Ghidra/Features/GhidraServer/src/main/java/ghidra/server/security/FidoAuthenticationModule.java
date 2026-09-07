@@ -45,8 +45,11 @@ import ghidra.server.security.fido.FidoCredentialStore;
  * <p>
  * Callbacks are a {@link NameCallback} plus a {@link FidoAuthenticationCallback} with
  * an empty allow-list. Clients that need per-user allowCredentials should call
- * {@link #getAllowCredentials(UserManager, String)} (exposed remotely as
- * {@code GhidraServerHandle.getFidoAllowCredentials}) after the user id is known.
+ * {@link #getAllowCredentials(UserManager, String, byte[])} (exposed remotely as
+ * {@code GhidraServerHandle.getFidoAllowCredentials}) after the user id is known,
+ * passing the still-valid callback challenge. A live challenge plus an enrolled
+ * username discloses that user's credential ids; unknown, unenrolled, invalid, and
+ * unauthenticated callers all receive an empty array.
  * Enrollment is selected by a one-time admin enroll token on the callback, not by
  * the server-issued {@code enroll} flag (always false for the one-round callback).
  */
@@ -87,10 +90,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 	 * @param timeoutSeconds client time budget in seconds
 	 */
 	public FidoAuthenticationModule(String rpId, String rpName, int timeoutSeconds) {
-		if (rpId == null || rpId.isBlank()) {
-			throw new IllegalArgumentException("rpId is required");
-		}
-		this.rpId = rpId.trim();
+		this.rpId = FidoAssertionVerifier.normalizeRpId(rpId);
 		this.rpName = rpName;
 		this.timeoutSeconds = timeoutSeconds;
 		this.verifier = new FidoAssertionVerifier(this.rpId);
@@ -106,7 +106,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 		if (hostname != null) {
 			hostname = hostname.trim();
 			if (!hostname.isEmpty()) {
-				return hostname;
+				return FidoAssertionVerifier.normalizeRpId(hostname);
 			}
 		}
 		return "localhost";
@@ -139,17 +139,25 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 	}
 
 	/**
-	 * Credential ids registered for {@code username}. Unknown users and users with no
-	 * credentials both return an empty array (no user-existence leak).
+	 * Credential ids registered for {@code username}. Requires a still-valid
+	 * (unconsumed) login challenge from {@link #getAuthenticationCallbacks()}.
+	 * Unknown users, users with no credentials, invalid input, I/O errors, and
+	 * a missing/stale challenge all return an empty array. Given a live challenge,
+	 * an enrolled username is distinguishable from an unknown one because ids
+	 * are returned.
 	 * @param userMgr server user manager
 	 * @param username login name
+	 * @param challenge callback challenge bytes (not consumed)
 	 * @return copies of credential id bytes; never null
 	 */
-	public byte[][] getAllowCredentials(UserManager userMgr, String username) {
-		if (userMgr == null || username == null || !UserManager.isValidUserName(username)) {
-			return EMPTY_ALLOW;
-		}
+	public byte[][] getAllowCredentials(UserManager userMgr, String username, byte[] challenge) {
 		try {
+			if (!TokenGenerator.hasIssuedToken(challenge)) {
+				return EMPTY_ALLOW;
+			}
+			if (userMgr == null || username == null || !UserManager.isValidUserName(username)) {
+				return EMPTY_ALLOW;
+			}
 			List<FidoCredential> list =
 				userMgr.getFidoCredentialStore().loadCredentials(username);
 			List<byte[]> ids = new ArrayList<>();
@@ -231,6 +239,9 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 		catch (IOException | RuntimeException e) {
 			fail(username, e.getMessage() == null ? e.toString() : e.getMessage());
 		}
+		catch (StackOverflowError e) {
+			fail(username, "verification overflow");
+		}
 		throw new FailedLoginException(AUTH_FAILED);
 	}
 
@@ -241,9 +252,12 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 		if (StringUtils.isBlank(enrollToken)) {
 			fail(username, "enroll token required");
 		}
+		FidoCredentialStore store = userMgr.getFidoCredentialStore();
+		if (!store.matchesEnrollToken(username, enrollToken)) {
+			fail(username, "enroll token invalid or already used");
+		}
 		Enrollment enrollment = verifier.verifyAttestation(challenge, authenticatorData,
 			clientDataJSON, attestationObject);
-		FidoCredentialStore store = userMgr.getFidoCredentialStore();
 		if (!store.consumeEnrollToken(username, enrollToken)) {
 			fail(username, "enroll token invalid or already used");
 		}

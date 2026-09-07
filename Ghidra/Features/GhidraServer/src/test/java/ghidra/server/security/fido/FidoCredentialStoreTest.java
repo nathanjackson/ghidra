@@ -115,6 +115,20 @@ public class FidoCredentialStoreTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testMatchesEnrollTokenDoesNotConsume() throws Exception {
+		String token = FidoCredentialStore.generateEnrollToken();
+		store.issueEnrollTokenHash(USER, FidoCredentialStore.hashEnrollToken(token),
+			System.currentTimeMillis() + FidoCredentialStore.DEFAULT_ENROLL_TTL_MS);
+
+		assertTrue(store.matchesEnrollToken(USER, token));
+		assertTrue(store.hasPendingEnrollToken(USER));
+		assertFalse(store.matchesEnrollToken(USER, "not-the-token"));
+		assertTrue(store.hasPendingEnrollToken(USER));
+		assertTrue(store.consumeEnrollToken(USER, token));
+		assertFalse(store.matchesEnrollToken(USER, token));
+	}
+
+	@Test
 	public void testWrongEnrollTokenDoesNotConsume() throws Exception {
 		String token = FidoCredentialStore.generateEnrollToken();
 		store.issueEnrollTokenHash(USER, FidoCredentialStore.hashEnrollToken(token),

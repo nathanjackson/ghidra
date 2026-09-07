@@ -237,19 +237,46 @@ public class FidoAuthenticationModuleTest extends AbstractGenericTest {
 
 	@Test
 	public void testGetAllowCredentialsEmptyForUnknown() throws Exception {
-		byte[][] ids = module.getAllowCredentials(userMgr(), OTHER);
+		byte[] challenge = fido(module.getAuthenticationCallbacks()).getChallenge();
+		byte[][] ids = module.getAllowCredentials(userMgr(), OTHER, challenge);
 		assertNotNull(ids);
 		assertEquals(0, ids.length);
-		assertEquals(0, module.getAllowCredentials(userMgr(), "not a user!").length);
-		assertEquals(0, module.getAllowCredentials(userMgr(), null).length);
+		assertEquals(0, module.getAllowCredentials(userMgr(), "not a user!", challenge).length);
+		assertEquals(0, module.getAllowCredentials(userMgr(), null, challenge).length);
 	}
 
 	@Test
 	public void testGetAllowCredentialsReturnsStoredIds() throws Exception {
 		storeCredential(0);
-		byte[][] ids = module.getAllowCredentials(userMgr(), USER);
+		byte[] challenge = fido(module.getAuthenticationCallbacks()).getChallenge();
+		byte[][] ids = module.getAllowCredentials(userMgr(), USER, challenge);
 		assertEquals(1, ids.length);
 		assertArrayEquals(credId, ids[0]);
+	}
+
+	@Test
+	public void testGetAllowCredentialsEmptyWithoutLiveChallenge() throws Exception {
+		storeCredential(0);
+		assertEquals(0, module.getAllowCredentials(userMgr(), USER, null).length);
+		assertEquals(0, module.getAllowCredentials(userMgr(), USER, new byte[64]).length);
+	}
+
+	@Test
+	public void testRpIdNormalizedToLowercase() {
+		assertEquals("localhost", new FidoAuthenticationModule("LocalHost").getRpId());
+	}
+
+	@Test
+	public void testEnrollWrongTokenSkipsAttestationAndDoesNotConsume() throws Exception {
+		String token = issueEnrollToken();
+		Callback[] callbacks = module.getAuthenticationCallbacks();
+		fillName(callbacks, USER);
+		FidoAuthenticationCallback fidoCb = fido(callbacks);
+		fidoCb.setEnrollToken("not-the-token");
+		fidoCb.setAttestationObject(new byte[] { (byte) 0xC0, (byte) 0xC0, (byte) 0xC0 });
+		assertAuthFailed(callbacks);
+		assertTrue(store().hasPendingEnrollToken(USER));
+		assertTrue(store().matchesEnrollToken(USER, token));
 	}
 
 	@Test

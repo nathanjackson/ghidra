@@ -261,14 +261,15 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 	}
 
 	@Override
-	public byte[][] getFidoAllowCredentials(String username) throws RemoteException {
+	public byte[][] getFidoAllowCredentials(String username, byte[] challenge)
+			throws RemoteException {
 		log.info("FIDO allowCredentials requested by " + RepositoryManager.getRMIClient());
 		try {
 			if (!(authModule instanceof FidoAuthenticationModule)) {
 				return new byte[0][];
 			}
 			return ((FidoAuthenticationModule) authModule).getAllowCredentials(mgr.getUserManager(),
-				username);
+				username, challenge);
 		}
 		catch (Throwable t) {
 			log.error("Failed to get FIDO allowCredentials", t);
