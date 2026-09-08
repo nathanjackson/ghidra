@@ -25,6 +25,53 @@ if (findProject(':Generic') == null) {
 
 def fido2Cflags = []
 def fido2Libs = ["-lfido2"]
+def fido2Arches = [] as Set
+
+def probeFido2Arches = { List libs ->
+	def dirs = []
+	try {
+		def libdirProc = "pkg-config --variable=libdir libfido2".execute()
+		libdirProc.waitFor()
+		if (libdirProc.exitValue() == 0) {
+			def dir = libdirProc.text.trim()
+			if (dir) {
+				dirs << dir
+			}
+		}
+	}
+	catch (Exception e) {
+		// pkg-config libdir is optional; -L flags are enough
+	}
+	libs.each { arg ->
+		if (arg.startsWith("-L") && arg.length() > 2) {
+			dirs << arg.substring(2)
+		}
+	}
+	def names = ["libfido2.dylib", "libfido2.so", "libfido2.a"]
+	for (dir in dirs) {
+		for (name in names) {
+			def lib = new File(dir, name)
+			if (!lib.isFile()) {
+				continue
+			}
+			try {
+				def lipo = ["lipo", "-archs", lib.absolutePath].execute()
+				lipo.waitFor()
+				if (lipo.exitValue() == 0) {
+					def arches = lipo.text.trim().split("\\s+").findAll { it }
+					if (arches) {
+						return arches as Set
+					}
+				}
+			}
+			catch (Exception e) {
+				// lipo exists only on macOS
+			}
+		}
+	}
+	return [] as Set
+}
+
 try {
 	def cflagsProc = "pkg-config --cflags libfido2".execute()
 	cflagsProc.waitFor()
@@ -42,10 +89,27 @@ try {
 			fido2Libs = libs.split("\\s+")
 		}
 	}
+	fido2Arches = probeFido2Arches(fido2Libs as List)
 }
 catch (Exception e) {
-	// libfido2 is optional at configure time; Linux link still requests -lfido2
+	// libfido2 is optional at configure time; matching-arch targets still link -lfido2
 }
+
+def fido2SupportsMac = { String platformName ->
+	if (fido2Arches.isEmpty()) {
+		return true
+	}
+	if (platformName == "mac_arm_64") {
+		return fido2Arches.contains("arm64") || fido2Arches.contains("aarch64")
+	}
+	if (platformName == "mac_x86_64") {
+		return fido2Arches.contains("x86_64")
+	}
+	return true
+}
+
+def includeMacX86 = fido2SupportsMac("mac_x86_64")
+def includeMacArm = fido2SupportsMac("mac_arm_64")
 
 model {
 	components {
@@ -56,8 +120,13 @@ model {
 			targetPlatform "win_arm_64"
 			targetPlatform "linux_x86_64"
 			targetPlatform "linux_arm_64"
-			targetPlatform "mac_x86_64"
-			targetPlatform "mac_arm_64"
+			// Homebrew libfido2 is usually single-arch; only build slices it can link.
+			if (includeMacX86) {
+				targetPlatform "mac_x86_64"
+			}
+			if (includeMacArm) {
+				targetPlatform "mac_arm_64"
+			}
 			targetPlatform "freebsd_x86_64"
 			targetPlatform "freebsd_arm_64"
 			targetPlatform "openbsd_x86_64"
@@ -110,32 +179,26 @@ model {
 			else if (b.toolChain in Clang) {
 				b.cCompiler.args "-Wall"
 				b.cCompiler.args "-O2"
+				b.cCompiler.args "-std=c99"
 				def osName = b.targetPlatform.operatingSystem.name
-				if (osName == "osx") {
-					b.cCompiler.args "-x"
-					b.cCompiler.args "objective-c"
-					b.cCompiler.args "-fobjc-arc"
-					b.linker.args "-framework"
-					b.linker.args "Foundation"
-					b.linker.args "-framework"
-					b.linker.args "AppKit"
-					b.linker.args "-framework"
-					b.linker.args "AuthenticationServices"
-					b.linker.args "-sectcreate"
-					b.linker.args "__TEXT"
-					b.linker.args "__info_plist"
-					b.linker.args "${project.projectDir}/src/fido/ghidra-fido-Info.plist"
+				def platformName = b.targetPlatform.name
+				def useLibfido2 = osName == "osx" || b.targetPlatform.operatingSystem.linux ||
+					osName == "freebsd" || osName == "openbsd"
+				if (osName == "osx" && !fido2SupportsMac(platformName)) {
+					b.buildable = false
+					useLibfido2 = false
 				}
-				else {
-					b.cCompiler.args "-std=c99"
-					if (b.targetPlatform.operatingSystem.linux || osName == "freebsd" ||
-						osName == "openbsd") {
-						fido2Cflags.each { arg -> b.cCompiler.args arg }
-						fido2Libs.each { arg -> b.linker.args arg }
+				if (useLibfido2) {
+					fido2Cflags.each { arg -> b.cCompiler.args arg }
+					fido2Libs.each { arg ->
+						b.linker.args arg
+						if (osName == "osx" && arg.startsWith("-L")) {
+							b.linker.args "-Wl,-rpath,${arg.substring(2)}"
+						}
 					}
-					if (osName == "freebsd") {
-						b.cCompiler.define "_XOPEN_SOURCE", "600"
-					}
+				}
+				if (osName == "freebsd") {
+					b.cCompiler.define "_XOPEN_SOURCE", "600"
 				}
 			}
 		}

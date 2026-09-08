@@ -21,10 +21,8 @@
 
 #if defined(_WIN32)
 #include "ghidra-fido-win.c"
-#elif defined(__APPLE__)
-#include "ghidra-fido-mac.c"
 #else
-#include "ghidra-fido-linux.c"
+#include "ghidra-fido-libfido2.c"
 #endif
 
 int main(void) {

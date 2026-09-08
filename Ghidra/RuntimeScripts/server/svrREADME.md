@@ -241,8 +241,10 @@ The Ghidra Server has been designed to support many  possible user authenticatio
   with `svrAdmin -fido-list <user_sid>`. Revoke one credential, or all credentials and any pending
   enroll token, with `svrAdmin -fido-revoke <user_sid> [credentialId]`.
 
-  Linux clients need extra udev rules only if FIDO2 security keys have never worked in a browser on
-  that machine. A fallback snippet is shipped as
+  Linux and macOS clients require libfido2 (`brew install libfido2` on macOS). Enter the
+  security-key PIN in the login dialog when the key has a PIN; otherwise enrollment fails
+  before the key blinks. Linux clients need extra udev rules only if FIDO2 security keys have
+  never worked in a browser on that machine. A fallback snippet is shipped as
   `Ghidra/Framework/FileSystem/data/70-ghidra-fido.rules`. Copy it to `/etc/udev/rules.d/` and
   reload udev if needed. Do not install it if Chrome or Firefox can already use the key.
 

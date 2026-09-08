@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * CTAP/HID backend for Linux, macOS, and BSD. AuthenticationServices cannot
+ * be used from Ghidra's unsigned helper (no application identifier).
+ */
 #include "ghidra-fido-json.h"
 
 #include <fido.h>
@@ -74,7 +78,10 @@ static void set_fido_err(char *err, size_t errlen, int r) {
 			set_err(err, errlen, "FIDO helper timed out");
 			break;
 		default:
-			set_err(err, errlen, "security key assertion or enrollment failed");
+			if (err && errlen) {
+				snprintf(err, errlen, "security key assertion or enrollment failed (%s)",
+					fido_strerr(r));
+			}
 			break;
 	}
 }
