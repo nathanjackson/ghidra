@@ -1,0 +1,18 @@
+MODULE FILE LICENSE: os/linux_x86_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/linux_x86_64/ghidra-fido MIT
+MODULE FILE LICENSE: os/linux_arm_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/linux_arm_64/ghidra-fido MIT
+MODULE FILE LICENSE: os/mac_x86_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/mac_x86_64/ghidra-fido MIT
+MODULE FILE LICENSE: os/mac_x86_64/ghidra-fido Apache License 2.0
+MODULE FILE LICENSE: os/mac_arm_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/mac_arm_64/ghidra-fido MIT
+MODULE FILE LICENSE: os/mac_arm_64/ghidra-fido Apache License 2.0
+MODULE FILE LICENSE: os/freebsd_x86_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/freebsd_x86_64/ghidra-fido MIT
+MODULE FILE LICENSE: os/freebsd_arm_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/freebsd_arm_64/ghidra-fido MIT
+MODULE FILE LICENSE: os/openbsd_x86_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/openbsd_x86_64/ghidra-fido MIT
+MODULE FILE LICENSE: os/openbsd_arm_64/ghidra-fido BSD-2-YUBICO
+MODULE FILE LICENSE: os/openbsd_arm_64/ghidra-fido MIT

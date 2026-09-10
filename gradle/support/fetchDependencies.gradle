@@ -102,6 +102,25 @@ ext.deps = [
 		sha256: "d32a533516edc688ebbb96ae221b605be2712edd94d7428b42a4af5644250943",
 		destination: file("${DEPS_DIR}/BSim")
 	],
+	// Keep these versions in sync with FileSystem/buildNatives.gradle
+	[
+		name: "libfido2-1.17.0.tar.gz",
+		url: "https://developers.yubico.com/libfido2/Releases/libfido2-1.17.0.tar.gz",
+		sha256: "c1012c8871d71b65872fd5ff1a9d6b0838a55683a03e85ba97479ce57129c736",
+		destination: file("${DEPS_DIR}/FileSystem")
+	],
+	[
+		name: "libcbor-0.12.0.tar.gz",
+		url: "https://github.com/PJK/libcbor/archive/refs/tags/v0.12.0.tar.gz",
+		sha256: "5368add109db559f546d7ed10f440f39a273b073daa8da4abffc83815069fa7f",
+		destination: file("${DEPS_DIR}/FileSystem")
+	],
+	[
+		name: "openssl-3.5.8.tar.gz",
+		url: "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+		sha256: "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+		destination: file("${DEPS_DIR}/FileSystem")
+	],
 	[
 		name: "PyDev 9.3.0.zip",
 		url: "https://sourceforge.net/projects/pydev/files/pydev/PyDev%209.3.0/PyDev%209.3.0.zip",

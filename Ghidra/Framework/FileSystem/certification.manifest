@@ -4,6 +4,8 @@ README.md||GHIDRA||||END|
 data/70-ghidra-fido.rules||GHIDRA||||END|
 data/client.rmi.serial.filter||GHIDRA||||END|
 data/serialFilterREADME.md||GHIDRA||||END|
+src/fido/README.md||GHIDRA||||END|
+src/fido/build-fido-deps.sh||GHIDRA||||END|
 src/main/java/ghidra/framework/client/package.html||GHIDRA||reviewed||END|
 src/main/java/ghidra/framework/store/db/package.html||GHIDRA||reviewed||END|
 src/main/java/ghidra/framework/store/local/package.html||GHIDRA||reviewed||END|

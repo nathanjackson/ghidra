@@ -23,93 +23,114 @@ if (findProject(':Generic') == null) {
 	apply from: "../../../GPL/nativeBuildProperties.gradle"
 }
 
-def fido2Cflags = []
-def fido2Libs = ["-lfido2"]
-def fido2Arches = [] as Set
+ext.LIBFIDO2_DISTRO = "libfido2-1.17.0.tar.gz"
+ext.LIBCBOR_DISTRO = "libcbor-0.12.0.tar.gz"
+ext.OPENSSL_DISTRO = "openssl-3.5.8.tar.gz"
 
-def probeFido2Arches = { List libs ->
-	def dirs = []
+def findFidoTarball = { String name ->
+	def candidates = []
 	try {
-		def libdirProc = "pkg-config --variable=libdir libfido2".execute()
-		libdirProc.waitFor()
-		if (libdirProc.exitValue() == 0) {
-			def dir = libdirProc.text.trim()
-			if (dir) {
-				dirs << dir
-			}
-		}
+		candidates << file("${rootProject.DEPS_DIR}/FileSystem/${name}")
 	}
 	catch (Exception e) {
-		// pkg-config libdir is optional; -L flags are enough
+		// DEPS_DIR is only set in a full Ghidra build
 	}
-	libs.each { arg ->
-		if (arg.startsWith("-L") && arg.length() > 2) {
-			dirs << arg.substring(2)
-		}
+	try {
+		candidates << file("${rootProject.BIN_REPO}/Ghidra/Framework/FileSystem/${name}")
 	}
-	def names = ["libfido2.dylib", "libfido2.so", "libfido2.a"]
-	for (dir in dirs) {
-		for (name in names) {
-			def lib = new File(dir, name)
-			if (!lib.isFile()) {
-				continue
-			}
-			try {
-				def lipo = ["lipo", "-archs", lib.absolutePath].execute()
-				lipo.waitFor()
-				if (lipo.exitValue() == 0) {
-					def arches = lipo.text.trim().split("\\s+").findAll { it }
-					if (arches) {
-						return arches as Set
-					}
-				}
-			}
-			catch (Exception e) {
-				// lipo exists only on macOS
-			}
-		}
+	catch (Exception e) {
+		// BIN_REPO is only set in a full Ghidra build
 	}
-	return [] as Set
+	candidates << file("${projectDir}/src/fido/vendor/${name}")
+	return candidates.find { it != null && it.isFile() }
 }
 
-try {
-	def cflagsProc = "pkg-config --cflags libfido2".execute()
-	cflagsProc.waitFor()
-	if (cflagsProc.exitValue() == 0) {
-		def cflags = cflagsProc.text.trim()
-		if (cflags) {
-			fido2Cflags = cflags.split("\\s+")
-		}
-	}
-	def libsProc = "pkg-config --libs libfido2".execute()
-	libsProc.waitFor()
-	if (libsProc.exitValue() == 0) {
-		def libs = libsProc.text.trim()
-		if (libs) {
-			fido2Libs = libs.split("\\s+")
-		}
-	}
-	fido2Arches = probeFido2Arches(fido2Libs as List)
+def fidoSrcDir = file("${buildDir}/fido-src")
+def fidoPrefixRoot = file("${buildDir}/fido-prefix")
+def fidoDepsScript = file("${projectDir}/src/fido/build-fido-deps.sh")
+
+def fidoUnixPlatforms = []
+if (isCurrentMac()) {
+	fidoUnixPlatforms = ["mac_x86_64", "mac_arm_64"]
 }
-catch (Exception e) {
-	// libfido2 is optional at configure time; matching-arch targets still link -lfido2
+else if (isCurrentLinux() || isCurrentFreeBSD() || isCurrentOpenBSD()) {
+	fidoUnixPlatforms = [getCurrentPlatformName()]
 }
 
-def fido2SupportsMac = { String platformName ->
-	if (fido2Arches.isEmpty()) {
-		return true
+def requireFidoTarballs = {
+	def missing = [LIBFIDO2_DISTRO, LIBCBOR_DISTRO]
+	if (isCurrentMac()) {
+		missing << OPENSSL_DISTRO
 	}
-	if (platformName == "mac_arm_64") {
-		return fido2Arches.contains("arm64") || fido2Arches.contains("aarch64")
+	def absent = missing.findAll { findFidoTarball(it) == null }
+	if (!absent.isEmpty()) {
+		throw new GradleException(
+			"Missing vendored FIDO tarball(s): ${absent.join(', ')}.\n" +
+			"Run: gradle -I gradle/support/fetchDependencies.gradle init")
 	}
-	if (platformName == "mac_x86_64") {
-		return fido2Arches.contains("x86_64")
-	}
-	return true
 }
 
-def includeMacX86 = fido2SupportsMac("mac_x86_64")
-def includeMacArm = fido2SupportsMac("mac_arm_64")
+task unpackFidoDeps {
+	description = "Unpack libfido2 / libcbor / OpenSSL sources for the helper"
+	outputs.dir fidoSrcDir
+	doFirst {
+		requireFidoTarballs()
+	}
+	doLast {
+		mkdir fidoSrcDir
+		[LIBFIDO2_DISTRO, LIBCBOR_DISTRO].each { name ->
+			copy {
+				from tarTree(findFidoTarball(name))
+				into fidoSrcDir
+			}
+		}
+		if (isCurrentMac()) {
+			copy {
+				from tarTree(findFidoTarball(OPENSSL_DISTRO))
+				into fidoSrcDir
+			}
+		}
+	}
+}
+
+fidoUnixPlatforms.each { plat ->
+	def prefix = file("${fidoPrefixRoot}/${plat}")
+	task "buildFidoDeps_${plat}"(type: Exec) {
+		description = "Build static libfido2 for ${plat}"
+		dependsOn unpackFidoDeps
+		inputs.dir fidoSrcDir
+		inputs.file fidoDepsScript
+		outputs.file "${prefix}/lib/libfido2.a"
+		workingDir projectDir
+		commandLine "sh", fidoDepsScript.absolutePath, prefix.absolutePath,
+			fidoSrcDir.absolutePath, plat
+	}
+}
+
+def fidoTaskToken = { String platform ->
+	def parts = platform.split("_") as List
+	parts[0] = parts[0].capitalize()
+	return parts.join("_")
+}
+
+tasks.whenTaskAdded { t ->
+	if (!t.name.startsWith("linkGhidraFido")) {
+		return
+	}
+	fidoUnixPlatforms.each { plat ->
+		if (t.name.contains(fidoTaskToken(plat))) {
+			t.dependsOn "buildFidoDeps_${plat}"
+			if (plat == getCurrentPlatformName()) {
+				t.finalizedBy checkGhidraFidoLinkage
+				checkGhidraFidoLinkage.dependsOn t
+			}
+		}
+	}
+}
+
+def fidoPrefixFor = { String platformName ->
+	return file("${fidoPrefixRoot}/${platformName}")
+}
 
 model {
 	components {
@@ -120,13 +141,8 @@ model {
 			targetPlatform "win_arm_64"
 			targetPlatform "linux_x86_64"
 			targetPlatform "linux_arm_64"
-			// Homebrew libfido2 is usually single-arch; only build slices it can link.
-			if (includeMacX86) {
-				targetPlatform "mac_x86_64"
-			}
-			if (includeMacArm) {
-				targetPlatform "mac_arm_64"
-			}
+			targetPlatform "mac_x86_64"
+			targetPlatform "mac_arm_64"
 			targetPlatform "freebsd_x86_64"
 			targetPlatform "freebsd_arm_64"
 			targetPlatform "openbsd_x86_64"
@@ -150,16 +166,23 @@ model {
 				b.cCompiler.args "-std=c99"
 				b.cCompiler.args "-Wall"
 				b.cCompiler.args "-O2"
-				if (b.targetPlatform.operatingSystem.linux) {
-					b.cCompiler.define "LINUX"
-					b.cCompiler.define "_LINUX"
-					fido2Cflags.each { arg -> b.cCompiler.args arg }
-					fido2Libs.each { arg -> b.linker.args arg }
-				}
-				if (b.targetPlatform.operatingSystem.name == "freebsd" ||
+				if (b.targetPlatform.operatingSystem.linux ||
+					b.targetPlatform.operatingSystem.name == "freebsd" ||
 					b.targetPlatform.operatingSystem.name == "openbsd") {
-					fido2Cflags.each { arg -> b.cCompiler.args arg }
-					fido2Libs.each { arg -> b.linker.args arg }
+					if (b.targetPlatform.operatingSystem.linux) {
+						b.cCompiler.define "LINUX"
+						b.cCompiler.define "_LINUX"
+					}
+					def prefix = fidoPrefixFor(b.targetPlatform.name)
+					b.cCompiler.args "-I${prefix}/include"
+					b.linker.args "${prefix}/lib/libfido2.a"
+					b.linker.args "${prefix}/lib/libcbor.a"
+					b.linker.args "-lcrypto"
+					b.linker.args "-lz"
+					b.linker.args "-lpthread"
+					if (b.targetPlatform.operatingSystem.linux) {
+						b.linker.args "-ludev"
+					}
 				}
 			}
 			else if (b.toolChain in VisualCpp) {
@@ -184,16 +207,25 @@ model {
 				def platformName = b.targetPlatform.name
 				def useLibfido2 = osName == "osx" || b.targetPlatform.operatingSystem.linux ||
 					osName == "freebsd" || osName == "openbsd"
-				if (osName == "osx" && !fido2SupportsMac(platformName)) {
-					b.buildable = false
-					useLibfido2 = false
-				}
 				if (useLibfido2) {
-					fido2Cflags.each { arg -> b.cCompiler.args arg }
-					fido2Libs.each { arg ->
-						b.linker.args arg
-						if (osName == "osx" && arg.startsWith("-L")) {
-							b.linker.args "-Wl,-rpath,${arg.substring(2)}"
+					def prefix = fidoPrefixFor(platformName)
+					b.cCompiler.args "-I${prefix}/include"
+					b.linker.args "${prefix}/lib/libfido2.a"
+					b.linker.args "${prefix}/lib/libcbor.a"
+					if (osName == "osx") {
+						b.linker.args "${prefix}/lib/libcrypto.a"
+						b.linker.args "-lz"
+						b.linker.args "-framework"
+						b.linker.args "IOKit"
+						b.linker.args "-framework"
+						b.linker.args "CoreFoundation"
+					}
+					else {
+						b.linker.args "-lcrypto"
+						b.linker.args "-lz"
+						b.linker.args "-lpthread"
+						if (b.targetPlatform.operatingSystem.linux) {
+							b.linker.args "-ludev"
 						}
 					}
 				}
@@ -201,6 +233,51 @@ model {
 					b.cCompiler.define "_XOPEN_SOURCE", "600"
 				}
 			}
+		}
+	}
+}
+
+task checkGhidraFidoLinkage {
+	description = "Fail if ghidra-fido still links a system libfido2"
+	doLast {
+		def platform = getCurrentPlatformName()
+		def bin = file("${buildDir}/os/${platform}/ghidra-fido")
+		if (!bin.isFile()) {
+			bin = file("${buildDir}/os/${platform}/ghidra-fido.exe")
+		}
+		if (!bin.isFile()) {
+			logger.warn("ghidra-fido not built for ${platform}; skipping linkage check")
+			return
+		}
+		if (isCurrentWindows()) {
+			return
+		}
+		def proc
+		if (isCurrentMac()) {
+			proc = ["otool", "-L", bin.absolutePath].execute()
+		}
+		else {
+			proc = ["ldd", bin.absolutePath].execute()
+		}
+		proc.waitFor()
+		def out = proc.text
+		logger.lifecycle(out)
+		if (out.contains("libfido2")) {
+			throw new GradleException("ghidra-fido still links libfido2:\n${out}")
+		}
+		if (isCurrentMac()) {
+			if (out.contains("libcrypto") || out.contains("/opt/homebrew") ||
+				out.contains("libcbor")) {
+				throw new GradleException("ghidra-fido has disallowed dylibs:\n${out}")
+			}
+		}
+	}
+}
+
+gradle.taskGraph.whenReady { graph ->
+	graph.allTasks.each { t ->
+		if (t.name == "buildNatives" || t.name.startsWith("buildNatives_")) {
+			t.finalizedBy checkGhidraFidoLinkage
 		}
 	}
 }

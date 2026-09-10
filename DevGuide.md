@@ -54,6 +54,8 @@ gradle cleanEclipse eclipse
 ```
 
 Build native components for your current platform.  Requires native tool chains to be present.
+The FIDO helper (`ghidra-fido`) also needs cmake. On Linux, install `libssl-dev`, `zlib1g-dev`,
+and `libudev-dev` (or distro equivalents). Tarballs come from `fetchDependencies`.
 ```
 gradle buildNatives
 ```

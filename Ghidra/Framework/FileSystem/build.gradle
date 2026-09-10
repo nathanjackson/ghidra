@@ -29,11 +29,23 @@ dependencies {
 	api project(':Docking')
 }
 
-// Include buildable native source in distribution
+// Include buildable native source and vendored tarballs in the distribution
 rootProject.assembleDistribution {
-	from (this.project.projectDir.toString()) {
+	def p = this.project
+	from (p.projectDir.toString()) {
 		include "src/fido/**"
-		into  { getZipPath(this.project) }
+		into  { getZipPath(p) }
+	}
+	def tarballNames = ["libfido2-1.17.0.tar.gz", "libcbor-0.12.0.tar.gz", "openssl-3.5.8.tar.gz"]
+	tarballNames.each { name ->
+		def depsFile = file("${DEPS_DIR}/FileSystem/${name}")
+		def binRepoFile = file("${BIN_REPO}/Ghidra/Framework/FileSystem/${name}")
+		def tarball = depsFile.exists() ? depsFile : binRepoFile
+		if (tarball.exists()) {
+			from(tarball) {
+				into { getZipPath(p) + "/src/fido/vendor" }
+			}
+		}
 	}
 }
 
