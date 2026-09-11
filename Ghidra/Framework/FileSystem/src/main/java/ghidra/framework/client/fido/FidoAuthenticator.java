@@ -33,6 +33,7 @@ import ghidra.framework.Application;
 import ghidra.framework.OSFileNotFoundException;
 import ghidra.framework.OperatingSystem;
 import ghidra.framework.remote.FidoAuthenticationCallback;
+import ghidra.framework.remote.FidoRpId;
 
 /**
  * Invokes the platform {@code ghidra-fido} helper to complete a FIDO2 assertion
@@ -44,8 +45,6 @@ public class FidoAuthenticator {
 	static final String HELPER_NAME = "ghidra-fido";
 	static final String OP_ASSERT = "assert";
 	static final String OP_CREATE = "create";
-	static final String UV_REQUIRED = "required";
-	static final String ATTACHMENT_CROSS_PLATFORM = "cross-platform";
 
 	private static final int DEFAULT_TIMEOUT_MS = 60_000;
 	private static final int MIN_TIMEOUT_MS = 5_000;
@@ -81,34 +80,17 @@ public class FidoAuthenticator {
 	/**
 	 * Run assert or create and store the result on {@code fidoCb}.
 	 * {@code enrollToken} non-blank selects create; otherwise assert.
-	 * @param fidoCb callback to fill
-	 * @param userName login name
-	 * @param enrollToken one-time admin enroll token, or null/blank for assert
-	 * @param allowCredentials credential ids for assert; may be null or empty
-	 * @throws IOException if the helper fails
-	 */
-	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
-			byte[][] allowCredentials) throws IOException {
-		complete(fidoCb, userName, enrollToken, allowCredentials, null, null);
-	}
-
-	/**
-	 * Run assert or create and store the result on {@code fidoCb}.
-	 * @param pin security-key PIN for libfido2; may be null or empty. Not logged.
-	 */
-	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
-			byte[][] allowCredentials, char[] pin) throws IOException {
-		complete(fidoCb, userName, enrollToken, allowCredentials, pin, null);
-	}
-
-	/**
-	 * Run assert or create and store the result on {@code fidoCb}.
 	 * {@code connectedHost} is the hostname the client used to reach the server.
 	 * The helper is not spawned unless it matches {@code fidoCb.getRpId()}
 	 * (loopback aliases are equivalent). A null host is treated as the callback
 	 * rpId (unit tests of the helper protocol).
+	 * @param fidoCb callback to fill
+	 * @param userName login name
+	 * @param enrollToken one-time admin enroll token, or null/blank for assert
+	 * @param allowCredentials credential ids for assert; may be null or empty
 	 * @param pin security-key PIN for libfido2; may be null or empty. Not logged.
 	 * @param connectedHost host the client connected to; null uses callback rpId
+	 * @throws IOException if the helper fails
 	 */
 	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
 			byte[][] allowCredentials, char[] pin, String connectedHost) throws IOException {
@@ -150,11 +132,6 @@ public class FidoAuthenticator {
 	}
 
 	static String encodeRequest(String op, FidoAuthenticationCallback fidoCb, String userName,
-			byte[][] allowCredentials, int timeoutMs) {
-		return encodeRequest(op, fidoCb, userName, allowCredentials, timeoutMs, null);
-	}
-
-	static String encodeRequest(String op, FidoAuthenticationCallback fidoCb, String userName,
 			byte[][] allowCredentials, int timeoutMs, char[] pin) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("op", op);
@@ -176,9 +153,6 @@ public class FidoAuthenticator {
 			}
 		}
 		obj.add("allowCredentials", allow);
-		obj.addProperty("residentKey", Boolean.FALSE);
-		obj.addProperty("userVerification", UV_REQUIRED);
-		obj.addProperty("authenticatorAttachment", ATTACHMENT_CROSS_PLATFORM);
 		if (pin != null && pin.length > 0) {
 			obj.addProperty("pin", new String(pin));
 		}
@@ -218,14 +192,6 @@ public class FidoAuthenticator {
 			fidoCb.setAttestationObject(attestation);
 			fidoCb.setEnrollToken(enrollToken);
 		}
-	}
-
-	/**
-	 * {@return WebAuthn origin for {@code rpId}}
-	 * @param rpId relying-party id
-	 */
-	public static String originFor(String rpId) {
-		return FidoRpId.originFor(rpId);
 	}
 
 	static byte[] userIdFor(String userName) {

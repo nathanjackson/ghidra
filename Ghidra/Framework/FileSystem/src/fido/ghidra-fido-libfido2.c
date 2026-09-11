@@ -155,55 +155,6 @@ static char *read_pin_tty(void) {
 	return pin;
 }
 
-static int encode_cbor_bstr(uint8_t *buf, size_t *n, const uint8_t *data, size_t len) {
-	if (len < 24) {
-		buf[(*n)++] = (uint8_t)(0x40 + len);
-	}
-	else if (len <= 0xFF) {
-		buf[(*n)++] = 0x58;
-		buf[(*n)++] = (uint8_t)len;
-	}
-	else {
-		buf[(*n)++] = 0x59;
-		buf[(*n)++] = (uint8_t)(len >> 8);
-		buf[(*n)++] = (uint8_t)len;
-	}
-	if (data != NULL && len > 0) {
-		memcpy(buf + *n, data, len);
-		*n += len;
-	}
-	return 0;
-}
-
-/* Server accepts fmt=none with empty attStmt; never wrap a batch-attestation sig as packed. */
-static int encode_none_attestation(const uint8_t *authdata, size_t authdata_len, uint8_t **out,
-	size_t *out_len) {
-	size_t cap = 32 + authdata_len;
-	uint8_t *buf = (uint8_t *)malloc(cap);
-	if (!buf) {
-		return -1;
-	}
-	size_t n = 0;
-	buf[n++] = 0xA3; /* map(3) */
-	buf[n++] = 0x63;
-	memcpy(buf + n, "fmt", 3);
-	n += 3;
-	buf[n++] = 0x64;
-	memcpy(buf + n, "none", 4);
-	n += 4;
-	buf[n++] = 0x68;
-	memcpy(buf + n, "authData", 8);
-	n += 8;
-	encode_cbor_bstr(buf, &n, authdata, authdata_len);
-	buf[n++] = 0x67;
-	memcpy(buf + n, "attStmt", 7);
-	n += 7;
-	buf[n++] = 0xA0; /* map(0) */
-	*out = buf;
-	*out_len = n;
-	return 0;
-}
-
 static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_response *resp,
 	char *err, size_t errlen) {
 	fido_assert_t *assert = fido_assert_new();
@@ -396,7 +347,7 @@ static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 	}
 	resp->authenticator_data = dup_mem(auth, auth_len);
 	resp->authenticator_data_len = auth_len;
-	if (encode_none_attestation(auth, auth_len, &resp->attestation_object,
+	if (fido_encode_none_attestation(auth, auth_len, &resp->attestation_object,
 		&resp->attestation_object_len) != 0) {
 		set_err(err, errlen, "security key assertion or enrollment failed");
 		goto done;

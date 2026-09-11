@@ -20,9 +20,7 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.interfaces.ECPublicKey;
-import java.security.interfaces.RSAPublicKey;
 import java.security.spec.ECGenParameterSpec;
-import java.util.Arrays;
 import java.util.Base64;
 
 /**
@@ -44,12 +42,6 @@ final class FidoWebAuthnFixtures {
 		return gen.generateKeyPair();
 	}
 
-	static KeyPair rs256() throws GeneralSecurityException {
-		KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
-		gen.initialize(2048);
-		return gen.generateKeyPair();
-	}
-
 	static byte[] coseEs256(ECPublicKey pub) {
 		byte[] x = unsignedCoord(pub.getW().getAffineX(), 32);
 		byte[] y = unsignedCoord(pub.getW().getAffineY(), 32);
@@ -63,18 +55,11 @@ final class FidoWebAuthnFixtures {
 		return w.toByteArray();
 	}
 
-	static byte[] coseRs256(RSAPublicKey pub) {
-		return coseRs256Raw(unsignedBytes(pub.getModulus()),
-			unsignedBytes(pub.getPublicExponent()));
-	}
-
-	static byte[] coseRs256Raw(byte[] n, byte[] e) {
+	static byte[] coseRsaKty() {
 		CborWriter w = new CborWriter();
-		w.map(4);
+		w.map(2);
 		w.integer(1).integer(3);
 		w.integer(3).integer(-257);
-		w.integer(-1).bytes(n);
-		w.integer(-2).bytes(e);
 		return w.toByteArray();
 	}
 
@@ -134,41 +119,11 @@ final class FidoWebAuthnFixtures {
 		return sig.sign();
 	}
 
-	static byte[] signRs256(PrivateKey priv, byte[] authenticatorData, byte[] clientDataJSON)
-			throws GeneralSecurityException {
-		Signature sig = Signature.getInstance("SHA256withRSA");
-		sig.initSign(priv);
-		sig.update(signedMessage(authenticatorData, clientDataJSON));
-		return sig.sign();
-	}
-
 	static byte[] attestationNone(byte[] authData) {
 		CborWriter w = new CborWriter();
 		w.map(3);
 		w.text("fmt").text("none");
 		w.text("attStmt").map(0);
-		w.text("authData").bytes(authData);
-		return w.toByteArray();
-	}
-
-	static byte[] attestationPacked(byte[] authData, byte[] clientDataJSON, PrivateKey priv,
-			boolean es256) throws GeneralSecurityException {
-		byte[] sig = es256 ? signEs256(priv, authData, clientDataJSON)
-				: signRs256(priv, authData, clientDataJSON);
-		return attestationPacked(authData, sig, es256, true);
-	}
-
-	static byte[] attestationPacked(byte[] authData, byte[] sig, boolean es256, boolean includeAlg) {
-		CborWriter stmt = new CborWriter();
-		stmt.map(includeAlg ? 2 : 1);
-		if (includeAlg) {
-			stmt.text("alg").integer(es256 ? -7 : -257);
-		}
-		stmt.text("sig").bytes(sig);
-		CborWriter w = new CborWriter();
-		w.map(3);
-		w.text("fmt").text("packed");
-		w.text("attStmt").raw(stmt.toByteArray());
 		w.text("authData").bytes(authData);
 		return w.toByteArray();
 	}
@@ -237,14 +192,6 @@ final class FidoWebAuthnFixtures {
 			System.arraycopy(raw, 0, out, size - raw.length, raw.length);
 		}
 		return out;
-	}
-
-	private static byte[] unsignedBytes(BigInteger v) {
-		byte[] raw = v.toByteArray();
-		if (raw.length > 1 && raw[0] == 0) {
-			return Arrays.copyOfRange(raw, 1, raw.length);
-		}
-		return raw;
 	}
 
 	static final class CborWriter {

@@ -52,7 +52,6 @@ import ghidra.net.*;
 import ghidra.server.RepositoryManager;
 import ghidra.server.UserManager;
 import ghidra.server.security.*;
-import ghidra.server.security.fido.FidoAssertionVerifier;
 import ghidra.server.stream.BlockStreamServer;
 import ghidra.server.stream.RemoteBlockStreamHandle;
 import ghidra.util.SystemUtilities;
@@ -894,7 +893,7 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 				log.info("   Prompt for user ID: yes");
 				String fidoRpId = FidoAuthenticationModule.resolveDefaultRpId();
 				log.info("   FIDO RP ID: " + fidoRpId);
-				if (FidoAssertionVerifier.isLoopbackRpId(fidoRpId)) {
+				if (FidoRpId.isLoopback(fidoRpId)) {
 					log.warn(
 						"   FIDO RP ID is loopback; credentials will not work from other hosts");
 				}

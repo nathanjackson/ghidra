@@ -32,6 +32,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import ghidra.framework.remote.FidoAuthenticationCallback;
+import ghidra.framework.remote.FidoRpId;
 import ghidra.framework.remote.GhidraPrincipal;
 import ghidra.server.RepositoryManager;
 import ghidra.server.UserManager;
@@ -92,7 +93,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 	 * @param timeoutSeconds client time budget in seconds
 	 */
 	public FidoAuthenticationModule(String rpId, String rpName, int timeoutSeconds) {
-		this.rpId = FidoAssertionVerifier.normalizeRpId(rpId);
+		this.rpId = FidoRpId.normalize(rpId);
 		this.rpName = rpName;
 		this.timeoutSeconds = timeoutSeconds;
 		this.verifier = new FidoAssertionVerifier(this.rpId);
@@ -108,7 +109,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 		if (hostname != null) {
 			hostname = hostname.trim();
 			if (!hostname.isEmpty()) {
-				return FidoAssertionVerifier.normalizeRpId(hostname);
+				return FidoRpId.normalize(hostname);
 			}
 		}
 		return "localhost";
@@ -125,7 +126,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 				"FIDO authentication (-a5) requires -ip <hostname>");
 		}
 		String rpId = resolveDefaultRpId();
-		if (FidoAssertionVerifier.isLoopbackRpId(rpId)) {
+		if (FidoRpId.isLoopback(rpId)) {
 			return;
 		}
 		if (isIpLiteral(rpId)) {
@@ -138,7 +139,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 		if (rpId == null || rpId.isBlank()) {
 			return false;
 		}
-		if (FidoAssertionVerifier.isLoopbackRpId(rpId)) {
+		if (FidoRpId.isLoopback(rpId)) {
 			return false;
 		}
 		if (rpId.indexOf(':') >= 0) {
@@ -253,7 +254,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 		byte[] signature = fidoCb.getSignature();
 		byte[] attestationObject = fidoCb.getAttestationObject();
 		String enrollToken = fidoCb.getEnrollToken();
-		boolean enroll = fidoCb.isEnroll() || !StringUtils.isBlank(enrollToken);
+		boolean enroll = !StringUtils.isBlank(enrollToken);
 
 		fidoCb.clearEnrollToken();
 		fidoCb.clearAssertion();

@@ -229,11 +229,6 @@ public class TokenGenerator {
 			return !record.expired();
 		}
 
-		boolean contains(byte[] token) {
-			TokenRecord record = cache.get(new Token(token));
-			return record != null && !record.expired();
-		}
-
 		TokenRecord get(byte[] token) {
 			return cache.get(new Token(token));
 		}

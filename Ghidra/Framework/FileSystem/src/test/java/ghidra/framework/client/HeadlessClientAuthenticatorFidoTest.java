@@ -36,8 +36,8 @@ import com.google.gson.JsonParser;
 
 import generic.test.AbstractGenericTest;
 import ghidra.framework.client.fido.FidoAuthenticator;
-import ghidra.framework.client.fido.FidoRpId;
 import ghidra.framework.remote.FidoAuthenticationCallback;
+import ghidra.framework.remote.FidoRpId;
 
 public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 

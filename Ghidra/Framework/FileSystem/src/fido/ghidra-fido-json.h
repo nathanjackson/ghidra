@@ -37,9 +37,6 @@ typedef struct {
 	uint8_t *allow[FIDO_MAX_ALLOW];
 	size_t allow_len[FIDO_MAX_ALLOW];
 	int allow_count;
-	int resident_key;
-	char *user_verification;
-	char *attachment;
 	char *pin;
 } fido_request;
 
@@ -67,6 +64,8 @@ char *fido_build_client_data_json(const char *type, const char *challenge_b64,
 char *fido_b64url_encode(const uint8_t *data, size_t len);
 int fido_b64url_decode(const char *s, uint8_t **out, size_t *out_len);
 void fido_wipe(void *p, size_t n);
+int fido_encode_none_attestation(const uint8_t *authdata, size_t authdata_len, uint8_t **out,
+	size_t *out_len);
 
 int fido_platform_assert(const fido_request *req, fido_response *resp, char *err,
 	size_t errlen);

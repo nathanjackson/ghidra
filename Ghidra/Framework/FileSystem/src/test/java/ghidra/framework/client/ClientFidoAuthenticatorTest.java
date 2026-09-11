@@ -100,7 +100,10 @@ public class ClientFidoAuthenticatorTest extends AbstractGenericTest {
 
 		assertTrue(ClientUtil.processFidoCallback(new Callback[] { nameCb, fido },
 			"server.example.test", "alice", handle, null));
-		assertEquals("alice", lookedUp.get());
+		// Custom authenticators do not receive the allow-list lookup; Default and
+		// Headless do (see HeadlessClientAuthenticatorFidoTest).
+		assertNull(lookedUp.get());
+		assertTrue(recording.called.get());
 	}
 
 	private static FidoAuthenticationCallback newCallback() {

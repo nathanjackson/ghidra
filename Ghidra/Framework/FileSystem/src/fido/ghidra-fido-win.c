@@ -226,10 +226,12 @@ int fido_platform_create(const fido_request *req, fido_response *resp, char *err
 	resp->credential_id_len = att->cbCredentialId;
 	resp->authenticator_data = dup_mem(att->pbAuthenticatorData, att->cbAuthenticatorData);
 	resp->authenticator_data_len = att->cbAuthenticatorData;
-	resp->signature = dup_mem(att->pbAttestation, att->cbAttestation);
-	resp->signature_len = att->cbAttestation;
-	resp->attestation_object = dup_mem(att->pbAttestationObject, att->cbAttestationObject);
-	resp->attestation_object_len = att->cbAttestationObject;
+	if (fido_encode_none_attestation(att->pbAuthenticatorData, att->cbAuthenticatorData,
+		&resp->attestation_object, &resp->attestation_object_len) != 0) {
+		WebAuthNFreeCredentialAttestation(att);
+		set_err(err, errlen, "security key enrollment failed");
+		return -1;
+	}
 	WebAuthNFreeCredentialAttestation(att);
 	if (!resp->credential_id || !resp->attestation_object) {
 		set_err(err, errlen, "security key enrollment failed");

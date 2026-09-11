@@ -503,8 +503,6 @@ public class ClientUtil {
 		FidoAllowCredentialsLookup lookup = null;
 		if (gsh != null) {
 			byte[] challenge = fidoCb.getChallenge();
-			String username = nameCb != null ? nameCb.getName() : defaultUserID;
-			gsh.getFidoAllowCredentials(username, challenge);
 			lookup = user -> gsh.getFidoAllowCredentials(user, challenge);
 		}
 		boolean ok;

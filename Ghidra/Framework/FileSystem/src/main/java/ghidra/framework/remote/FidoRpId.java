@@ -13,15 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package ghidra.framework.client.fido;
+package ghidra.framework.remote;
 
 import java.util.Locale;
 
 /**
- * Client-side WebAuthn relying-party id helpers. Mirrors server
- * {@code FidoAssertionVerifier} normalization so FileSystem does not depend
- * on GhidraServer packages. The client binds callback {@code rpId} to the
- * host it actually connected to before invoking {@code ghidra-fido}.
+ * WebAuthn relying-party id helpers shared by the Ghidra Server and client.
+ * The client also binds callback {@code rpId} to the host it actually
+ * connected to before invoking {@code ghidra-fido}.
  */
 public final class FidoRpId {
 

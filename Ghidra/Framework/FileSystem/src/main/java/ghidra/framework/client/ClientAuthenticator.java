@@ -100,7 +100,9 @@ public interface ClientAuthenticator extends KeyStorePasswordProvider {
 	 * @return true if authentication data provided, false if cancelled
 	 * @throws IOException if the FIDO helper or authenticator fails
 	 */
-	public boolean processFidoCallback(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
-			String serverName) throws IOException;
+	public default boolean processFidoCallback(NameCallback nameCb,
+			FidoAuthenticationCallback fidoCb, String serverName) throws IOException {
+		return false;
+	}
 
 }

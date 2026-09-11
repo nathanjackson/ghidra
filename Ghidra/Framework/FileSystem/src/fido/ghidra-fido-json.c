@@ -113,123 +113,6 @@ static int parse_number(const char **p, int *out) {
 	return 0;
 }
 
-static int parse_bool(const char **p, int *out) {
-	if (strncmp(*p, "true", 4) == 0) {
-		*out = 1;
-		*p += 4;
-		return 0;
-	}
-	if (strncmp(*p, "false", 5) == 0) {
-		*out = 0;
-		*p += 5;
-		return 0;
-	}
-	return -1;
-}
-
-static int skip_value(const char **p);
-
-static int skip_object_or_array(const char **p, char open_c, char close_c) {
-	if (**p != open_c) {
-		return -1;
-	}
-	(*p)++;
-	skip_ws(p);
-	if (**p == close_c) {
-		(*p)++;
-		return 0;
-	}
-	while (**p) {
-		if (skip_value(p) != 0) {
-			return -1;
-		}
-		skip_ws(p);
-		if (**p == ',') {
-			(*p)++;
-			skip_ws(p);
-			continue;
-		}
-		if (**p == close_c) {
-			(*p)++;
-			return 0;
-		}
-		return -1;
-	}
-	return -1;
-}
-
-static int skip_value(const char **p) {
-	skip_ws(p);
-	if (**p == '"') {
-		char *tmp = NULL;
-		if (parse_string(p, &tmp) != 0) {
-			return -1;
-		}
-		free(tmp);
-		return 0;
-	}
-	if (**p == '{') {
-		const char *s = *p;
-		s++;
-		skip_ws(&s);
-		if (*s == '}') {
-			s++;
-			*p = s;
-			return 0;
-		}
-		while (*s) {
-			char *key = NULL;
-			if (parse_string(&s, &key) != 0) {
-				return -1;
-			}
-			free(key);
-			skip_ws(&s);
-			if (*s != ':') {
-				return -1;
-			}
-			s++;
-			*p = s;
-			if (skip_value(p) != 0) {
-				return -1;
-			}
-			s = *p;
-			skip_ws(&s);
-			if (*s == ',') {
-				s++;
-				skip_ws(&s);
-				continue;
-			}
-			if (*s == '}') {
-				s++;
-				*p = s;
-				return 0;
-			}
-			return -1;
-		}
-		return -1;
-	}
-	if (**p == '[') {
-		return skip_object_or_array(p, '[', ']');
-	}
-	if (strncmp(*p, "true", 4) == 0) {
-		*p += 4;
-		return 0;
-	}
-	if (strncmp(*p, "false", 5) == 0) {
-		*p += 5;
-		return 0;
-	}
-	if (strncmp(*p, "null", 4) == 0) {
-		*p += 4;
-		return 0;
-	}
-	if (**p == '-' || isdigit((unsigned char)**p)) {
-		int dummy;
-		return parse_number(p, &dummy);
-	}
-	return -1;
-}
-
 static int parse_string_array(const char **p, fido_request *req) {
 	skip_ws(p);
 	if (**p != '[') {
@@ -263,7 +146,7 @@ static int parse_string_array(const char **p, fido_request *req) {
 		}
 		return -1;
 	}
-	return skip_object_or_array(p, '[', ']');
+	return -1;
 }
 
 int fido_read_stdin(char **out, size_t *out_len) {
@@ -384,24 +267,6 @@ int fido_parse_request(const char *json, fido_request *req) {
 				return -1;
 			}
 		}
-		else if (strcmp(key, "residentKey") == 0) {
-			if (parse_bool(&p, &req->resident_key) != 0) {
-				free(key);
-				return -1;
-			}
-		}
-		else if (strcmp(key, "userVerification") == 0) {
-			if (parse_string(&p, &req->user_verification) != 0) {
-				free(key);
-				return -1;
-			}
-		}
-		else if (strcmp(key, "authenticatorAttachment") == 0) {
-			if (parse_string(&p, &req->attachment) != 0) {
-				free(key);
-				return -1;
-			}
-		}
 		else if (strcmp(key, "pin") == 0) {
 			if (parse_string(&p, &req->pin) != 0) {
 				free(key);
@@ -409,10 +274,8 @@ int fido_parse_request(const char *json, fido_request *req) {
 			}
 		}
 		else {
-			if (skip_value(&p) != 0) {
-				free(key);
-				return -1;
-			}
+			free(key);
+			return -1;
 		}
 		free(key);
 		skip_ws(&p);
@@ -449,8 +312,6 @@ void fido_free_request(fido_request *req) {
 	free(req->challenge);
 	free(req->user_name);
 	free(req->user_id);
-	free(req->user_verification);
-	free(req->attachment);
 	if (req->pin) {
 		fido_wipe(req->pin, strlen(req->pin));
 		free(req->pin);
@@ -743,5 +604,53 @@ int fido_b64url_decode(const char *s, uint8_t **out, size_t *out_len) {
 	}
 	*out = buf;
 	*out_len = o;
+	return 0;
+}
+
+static int encode_cbor_bstr(uint8_t *buf, size_t *n, const uint8_t *data, size_t len) {
+	if (len < 24) {
+		buf[(*n)++] = (uint8_t)(0x40 + len);
+	}
+	else if (len <= 0xFF) {
+		buf[(*n)++] = 0x58;
+		buf[(*n)++] = (uint8_t)len;
+	}
+	else {
+		buf[(*n)++] = 0x59;
+		buf[(*n)++] = (uint8_t)(len >> 8);
+		buf[(*n)++] = (uint8_t)len;
+	}
+	if (data != NULL && len > 0) {
+		memcpy(buf + *n, data, len);
+		*n += len;
+	}
+	return 0;
+}
+
+int fido_encode_none_attestation(const uint8_t *authdata, size_t authdata_len, uint8_t **out,
+	size_t *out_len) {
+	size_t cap = 32 + authdata_len;
+	uint8_t *buf = (uint8_t *)malloc(cap);
+	if (!buf) {
+		return -1;
+	}
+	size_t n = 0;
+	buf[n++] = 0xA3; /* map(3) */
+	buf[n++] = 0x63;
+	memcpy(buf + n, "fmt", 3);
+	n += 3;
+	buf[n++] = 0x64;
+	memcpy(buf + n, "none", 4);
+	n += 4;
+	buf[n++] = 0x68;
+	memcpy(buf + n, "authData", 8);
+	n += 8;
+	encode_cbor_bstr(buf, &n, authdata, authdata_len);
+	buf[n++] = 0x67;
+	memcpy(buf + n, "attStmt", 7);
+	n += 7;
+	buf[n++] = 0xA0; /* map(0) */
+	*out = buf;
+	*out_len = n;
 	return 0;
 }

@@ -19,7 +19,6 @@ import static org.junit.Assert.*;
 
 import java.security.KeyPair;
 import java.security.interfaces.ECPublicKey;
-import java.security.interfaces.RSAPublicKey;
 import java.util.Arrays;
 
 import org.junit.Before;
@@ -220,35 +219,20 @@ public class FidoAssertionVerifierTest extends AbstractGenericTest {
 	}
 
 	@Test
-	public void testEnrollPackedSelfAttestation() throws Exception {
-		int flags = FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV |
-			FidoAssertionVerifier.FLAG_AT;
-		byte[] authData = FidoWebAuthnFixtures.authenticatorData(RP_ID, flags, 1,
-			FidoWebAuthnFixtures.CRED_ID, cose);
-		byte[] clientData =
-			FidoWebAuthnFixtures.clientDataJSON("webauthn.create", CHALLENGE, ORIGIN);
-		byte[] attestation = FidoWebAuthnFixtures.attestationPacked(authData, clientData,
-			es256.getPrivate(), true);
-
-		Enrollment enrollment =
-			verifier.verifyAttestation(CHALLENGE, null, clientData, attestation);
-		assertArrayEquals(FidoWebAuthnFixtures.CRED_ID, enrollment.getCredentialId());
-		assertEquals(1L, enrollment.getSignCount());
+	public void testEnrollPackedRejected() throws Exception {
+		expectAttestationReject(FidoWebAuthnFixtures.attestationFmt(enrollAuthData(), "packed"),
+			"format");
 	}
 
 	@Test
-	public void testAssertionRs256() throws Exception {
-		KeyPair rsa = FidoWebAuthnFixtures.rs256();
-		byte[] rsaCose = FidoWebAuthnFixtures.coseRs256((RSAPublicKey) rsa.getPublic());
-		byte[] authData = FidoWebAuthnFixtures.authenticatorData(RP_ID,
-			FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV, 8);
-		byte[] clientData =
-			FidoWebAuthnFixtures.clientDataJSON("webauthn.get", CHALLENGE, ORIGIN);
-		byte[] signature =
-			FidoWebAuthnFixtures.signRs256(rsa.getPrivate(), authData, clientData);
-
-		assertEquals(8L,
-			verifier.verifyAssertion(CHALLENGE, authData, clientData, signature, rsaCose, 1));
+	public void testCoseRsaKtyRejected() throws Exception {
+		try {
+			FidoAssertionVerifier.parseCosePublicKey(FidoWebAuthnFixtures.coseRsaKty());
+			fail("expected VerificationException");
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage().toLowerCase().contains("kty"));
+		}
 	}
 
 	@Test
@@ -286,19 +270,6 @@ public class FidoAssertionVerifierTest extends AbstractGenericTest {
 		}
 		catch (VerificationException e) {
 			assertTrue(e.getMessage().contains("alg"));
-		}
-	}
-
-	@Test
-	public void testRs256RejectsShortModulus() throws Exception {
-		try {
-			FidoAssertionVerifier.parseCosePublicKey(FidoWebAuthnFixtures.coseRs256Raw(
-				new byte[64], new byte[] { 1, 0, 1 }));
-			fail("expected VerificationException");
-		}
-		catch (VerificationException e) {
-			assertTrue(e.getMessage().toLowerCase().contains("rs256") ||
-				e.getMessage().toLowerCase().contains("invalid"));
 		}
 	}
 
@@ -358,27 +329,6 @@ public class FidoAssertionVerifierTest extends AbstractGenericTest {
 	public void testEnrollNoneRequiresEmptyAttStmt() throws Exception {
 		expectAttestationReject(
 			FidoWebAuthnFixtures.attestationNoneWithStmt(enrollAuthData(), false), "attStmt");
-	}
-
-	@Test
-	public void testEnrollPackedMissingAlg() throws Exception {
-		byte[] authData = enrollAuthData();
-		byte[] clientData =
-			FidoWebAuthnFixtures.clientDataJSON("webauthn.create", CHALLENGE, ORIGIN);
-		byte[] sig = FidoWebAuthnFixtures.signEs256(es256.getPrivate(), authData, clientData);
-		expectAttestationReject(FidoWebAuthnFixtures.attestationPacked(authData, sig, true, false),
-			"algorithm");
-	}
-
-	@Test
-	public void testEnrollPackedBadSignature() throws Exception {
-		byte[] authData = enrollAuthData();
-		byte[] clientData =
-			FidoWebAuthnFixtures.clientDataJSON("webauthn.create", CHALLENGE, ORIGIN);
-		byte[] sig = FidoWebAuthnFixtures.signEs256(es256.getPrivate(), authData, clientData);
-		sig[0] ^= 0x5A;
-		expectAttestationReject(FidoWebAuthnFixtures.attestationPacked(authData, sig, true, true),
-			"signature");
 	}
 
 	@Test

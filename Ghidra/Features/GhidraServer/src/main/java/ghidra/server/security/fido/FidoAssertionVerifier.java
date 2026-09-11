@@ -19,7 +19,6 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.interfaces.ECPublicKey;
-import java.security.interfaces.RSAPublicKey;
 import java.security.spec.*;
 import java.util.*;
 
@@ -27,8 +26,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import ghidra.framework.remote.FidoRpId;
+
 /**
- * Thin JDK+Gson WebAuthn L2 assertion and packed/none attestation verifier.
+ * Thin JDK+Gson WebAuthn L2 assertion and {@code none} attestation verifier.
  * No CBOR, JOSE, or BouncyCastle libraries.
  */
 public class FidoAssertionVerifier {
@@ -43,9 +44,7 @@ public class FidoAssertionVerifier {
 	private static final int ES256_RAW_SIG_LEN = 64;
 
 	private static final int KTY_EC2 = 2;
-	private static final int KTY_RSA = 3;
 	private static final int ALG_ES256 = -7;
-	private static final int ALG_RS256 = -257;
 	private static final int CRV_P256 = 1;
 
 	private static final int COSE_KTY = 1;
@@ -57,7 +56,6 @@ public class FidoAssertionVerifier {
 	private static final String TYPE_GET = "webauthn.get";
 	private static final String TYPE_CREATE = "webauthn.create";
 	private static final String FMT_NONE = "none";
-	private static final String FMT_PACKED = "packed";
 
 	private static final int MAX_CLIENT_DATA_BYTES = 4096;
 	private static final int MAX_ATTESTATION_BYTES = 8192;
@@ -65,8 +63,6 @@ public class FidoAssertionVerifier {
 	private static final int MAX_ENROLL_AUTH_DATA_BYTES = 8192;
 	private static final int MAX_SIGNATURE_BYTES = 512;
 	private static final int MAX_CREDENTIAL_ID_BYTES = 1024;
-	private static final int MIN_RSA_MODULUS_BYTES = 256;
-	private static final BigInteger MIN_RSA_EXPONENT = BigInteger.valueOf(65537);
 
 	private final String rpId;
 	private final byte[] rpIdHash;
@@ -75,29 +71,8 @@ public class FidoAssertionVerifier {
 	 * @param rpId WebAuthn relying-party id (stable hostname)
 	 */
 	public FidoAssertionVerifier(String rpId) {
-		this.rpId = normalizeRpId(rpId);
+		this.rpId = FidoRpId.normalize(rpId);
 		this.rpIdHash = sha256(this.rpId.getBytes(StandardCharsets.UTF_8));
-	}
-
-	/**
-	 * Lowercase ASCII rpId. Rejects scheme, port, and path. {@code ::1} / {@code [::1]}
-	 * are allowed loopback literals.
-	 * @param rpId candidate relying-party id
-	 * @return normalized rpId
-	 */
-	public static String normalizeRpId(String rpId) {
-		if (rpId == null || rpId.isBlank()) {
-			throw new IllegalArgumentException("rpId is required");
-		}
-		String n = rpId.trim().toLowerCase(Locale.ROOT);
-		if (n.contains("://") || n.indexOf('/') >= 0 || n.indexOf(' ') >= 0) {
-			throw new IllegalArgumentException("rpId must be a hostname or loopback literal");
-		}
-		int colon = n.indexOf(':');
-		if (colon > 0 && n.indexOf(':', colon + 1) < 0) {
-			throw new IllegalArgumentException("rpId must be a hostname or loopback literal");
-		}
-		return n;
 	}
 
 	/**
@@ -112,7 +87,7 @@ public class FidoAssertionVerifier {
 	 * @param challenge original challenge issued by the server
 	 * @param authenticatorData WebAuthn authenticator data
 	 * @param clientDataJSON WebAuthn clientDataJSON bytes
-	 * @param signature assertion signature (ES256 raw r||s or DER; RS256 PKCS#1)
+	 * @param signature assertion signature (ES256 raw r||s or DER)
 	 * @param publicKeyCose stored COSE_Key bytes
 	 * @param storedSignCount previously stored signature counter
 	 * @return verified signature counter from authenticator data
@@ -136,8 +111,8 @@ public class FidoAssertionVerifier {
 	}
 
 	/**
-	 * Verify a WebAuthn attestation object for enrollment. Accepts {@code none} and
-	 * packed self-attestation (signed with the new credential public key).
+	 * Verify a WebAuthn attestation object for enrollment. Accepts {@code none}
+	 * with an empty {@code attStmt}.
 	 * @param challenge original challenge issued by the server
 	 * @param authenticatorData authenticator data from the callback; if null, authData
 	 *        from the attestation object is used
@@ -176,42 +151,15 @@ public class FidoAssertionVerifier {
 		}
 
 		ParsedAuthData parsed = parseAuthenticatorData(attAuthData, true);
-		if (FMT_NONE.equals(fmt)) {
-			Map<Object, Object> attStmt = mapValue(attObj.get("attStmt"));
-			if (attStmt == null || !attStmt.isEmpty()) {
-				throw new VerificationException("none attStmt must be empty");
-			}
-		}
-		else if (FMT_PACKED.equals(fmt)) {
-			verifyPackedSelfAttestation(mapValue(attObj.get("attStmt")), attAuthData,
-				clientDataJSON, parsed.publicKeyCose);
-		}
-		else {
+		if (!FMT_NONE.equals(fmt)) {
 			throw new VerificationException("unsupported attestation format");
+		}
+		Map<Object, Object> attStmt = mapValue(attObj.get("attStmt"));
+		if (attStmt == null || !attStmt.isEmpty()) {
+			throw new VerificationException("none attStmt must be empty");
 		}
 		return new Enrollment(parsed.credentialId, parsed.publicKeyCose, parsed.signCount,
 			parsed.aaguid);
-	}
-
-	private void verifyPackedSelfAttestation(Map<Object, Object> attStmt, byte[] authData,
-			byte[] clientDataJSON, byte[] publicKeyCose) throws VerificationException {
-		if (attStmt == null) {
-			throw new VerificationException("packed attStmt required");
-		}
-		byte[] sig = bytesValue(attStmt.get("sig"));
-		Long alg = longValue(attStmt.get("alg"));
-		if (sig == null) {
-			throw new VerificationException("packed attStmt signature required");
-		}
-		if (alg == null) {
-			throw new VerificationException("packed attStmt algorithm required");
-		}
-		PublicKey publicKey = parseCosePublicKey(publicKeyCose);
-		int expected = (publicKey instanceof ECPublicKey) ? ALG_ES256 : ALG_RS256;
-		if (alg.intValue() != expected) {
-			throw new VerificationException("packed attStmt algorithm mismatch");
-		}
-		verifySignature(publicKey, signedMessage(authData, clientDataJSON), sig);
 	}
 
 	private void verifyClientData(byte[] clientDataJSON, byte[] challenge, String expectedType)
@@ -266,18 +214,12 @@ public class FidoAssertionVerifier {
 		if (("https://" + rpId).equals(origin)) {
 			return true;
 		}
-		if (!isLoopbackRpId(rpId)) {
+		if (!FidoRpId.isLoopback(rpId)) {
 			return false;
 		}
 		return "http://localhost".equals(origin) || "http://127.0.0.1".equals(origin) ||
 			"http://[::1]".equals(origin) || "https://localhost".equals(origin) ||
 			"https://127.0.0.1".equals(origin) || "https://[::1]".equals(origin);
-	}
-
-	public static boolean isLoopbackRpId(String rpId) {
-		String n = rpId.toLowerCase(Locale.ROOT);
-		return "localhost".equals(n) || "127.0.0.1".equals(n) || "::1".equals(n) ||
-			"[::1]".equals(n);
 	}
 
 	private ParsedAuthData parseAuthenticatorData(byte[] authData, boolean requireAttested)
@@ -353,25 +295,18 @@ public class FidoAssertionVerifier {
 		if (alg == null) {
 			throw new VerificationException("COSE alg required");
 		}
-		if (kty.intValue() == KTY_EC2) {
-			if (alg.intValue() != ALG_ES256) {
-				throw new VerificationException("unsupported COSE alg");
-			}
-			Long crv = longValue(mapGet(map, COSE_CRV_OR_N));
-			if (crv == null || crv.intValue() != CRV_P256) {
-				throw new VerificationException("unsupported EC curve");
-			}
-			return parseEs256(bytesValue(mapGet(map, COSE_X_OR_E)),
-				bytesValue(mapGet(map, COSE_Y)));
+		if (kty.intValue() != KTY_EC2) {
+			throw new VerificationException("unsupported COSE kty");
 		}
-		if (kty.intValue() == KTY_RSA) {
-			if (alg.intValue() != ALG_RS256) {
-				throw new VerificationException("unsupported COSE alg");
-			}
-			return parseRs256(bytesValue(mapGet(map, COSE_CRV_OR_N)),
-				bytesValue(mapGet(map, COSE_X_OR_E)));
+		if (alg.intValue() != ALG_ES256) {
+			throw new VerificationException("unsupported COSE alg");
 		}
-		throw new VerificationException("unsupported COSE kty");
+		Long crv = longValue(mapGet(map, COSE_CRV_OR_N));
+		if (crv == null || crv.intValue() != CRV_P256) {
+			throw new VerificationException("unsupported EC curve");
+		}
+		return parseEs256(bytesValue(mapGet(map, COSE_X_OR_E)),
+			bytesValue(mapGet(map, COSE_Y)));
 	}
 
 	private static PublicKey parseEs256(byte[] x, byte[] y) throws VerificationException {
@@ -390,44 +325,18 @@ public class FidoAssertionVerifier {
 		}
 	}
 
-	private static PublicKey parseRs256(byte[] n, byte[] e) throws VerificationException {
-		if (n == null || e == null || n.length < MIN_RSA_MODULUS_BYTES || e.length == 0) {
-			throw new VerificationException("invalid RS256 public key");
-		}
-		try {
-			BigInteger exponent = new BigInteger(1, e);
-			if (exponent.compareTo(MIN_RSA_EXPONENT) < 0) {
-				throw new VerificationException("invalid RS256 public key");
-			}
-			RSAPublicKeySpec spec =
-				new RSAPublicKeySpec(new BigInteger(1, n), exponent);
-			return KeyFactory.getInstance("RSA").generatePublic(spec);
-		}
-		catch (VerificationException ex) {
-			throw ex;
-		}
-		catch (GeneralSecurityException ex) {
-			throw new VerificationException("invalid RS256 public key");
-		}
-	}
-
 	private static void verifySignature(PublicKey publicKey, byte[] message, byte[] signature)
 			throws VerificationException {
 		if (signature == null || signature.length == 0) {
 			throw new VerificationException("signature required");
 		}
 		try {
-			if (publicKey instanceof ECPublicKey) {
-				byte[] der =
-					signature.length == ES256_RAW_SIG_LEN ? p1363ToDer(signature) : signature;
-				verifyJca("SHA256withECDSA", publicKey, message, der);
-			}
-			else if (publicKey instanceof RSAPublicKey) {
-				verifyJca("SHA256withRSA", publicKey, message, signature);
-			}
-			else {
+			if (!(publicKey instanceof ECPublicKey)) {
 				throw new VerificationException("unsupported public key");
 			}
+			byte[] der =
+				signature.length == ES256_RAW_SIG_LEN ? p1363ToDer(signature) : signature;
+			verifyJca("SHA256withECDSA", publicKey, message, der);
 		}
 		catch (VerificationException e) {
 			throw e;

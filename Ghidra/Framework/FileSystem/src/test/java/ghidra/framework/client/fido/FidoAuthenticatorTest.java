@@ -32,6 +32,7 @@ import com.google.gson.JsonParser;
 
 import generic.test.AbstractGenericTest;
 import ghidra.framework.remote.FidoAuthenticationCallback;
+import ghidra.framework.remote.FidoRpId;
 import ghidra.util.NumericUtilities;
 
 public class FidoAuthenticatorTest extends AbstractGenericTest {
@@ -55,7 +56,7 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 			return successJson(false).toString();
 		});
 		FidoAuthenticationCallback cb = newCallback(false);
-		auth.complete(cb, "alice", null, new byte[][] { CRED_ID });
+		auth.complete(cb, "alice", null, new byte[][] { CRED_ID }, null, null);
 
 		assertArrayEquals(CRED_ID, cb.getCredentialId());
 		assertArrayEquals(AUTH_DATA, cb.getAuthenticatorData());
@@ -74,9 +75,9 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 		assertEquals("alice", req.get("userName").getAsString());
 		assertEquals(FidoAuthenticator.encodeBase64Url(FidoAuthenticator.userIdFor("alice")),
 			req.get("userId").getAsString());
-		assertFalse(req.get("residentKey").getAsBoolean());
-		assertEquals("required", req.get("userVerification").getAsString());
-		assertEquals("cross-platform", req.get("authenticatorAttachment").getAsString());
+		assertFalse(req.has("residentKey"));
+		assertFalse(req.has("userVerification"));
+		assertFalse(req.has("authenticatorAttachment"));
 		JsonArray allow = req.getAsJsonArray("allowCredentials");
 		assertEquals(1, allow.size());
 		assertEquals(FidoAuthenticator.encodeBase64Url(CRED_ID), allow.get(0).getAsString());
@@ -96,7 +97,7 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 		});
 		try {
 			auth.complete(newCallback(false), "alice", null, new byte[][] { CRED_ID },
-				pin.toCharArray());
+				pin.toCharArray(), null);
 			fail("expected IOException");
 		}
 		catch (IOException e) {
@@ -115,7 +116,7 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 			return successJson(true).toString();
 		});
 		FidoAuthenticationCallback cb = newCallback(false);
-		auth.complete(cb, "bob", ENROLL_TOKEN, new byte[0][]);
+		auth.complete(cb, "bob", ENROLL_TOKEN, new byte[0][], null, null);
 
 		assertArrayEquals(CRED_ID, cb.getCredentialId());
 		assertArrayEquals(ATTESTATION, cb.getAttestationObject());
@@ -135,7 +136,7 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 		});
 		FidoAuthenticationCallback cb = newCallback(false);
 		try {
-			auth.complete(cb, "alice", null, new byte[][] { CRED_ID });
+			auth.complete(cb, "alice", null, new byte[][] { CRED_ID }, null, null);
 			fail("expected IOException");
 		}
 		catch (IOException e) {
@@ -150,10 +151,10 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 
 	@Test
 	public void testLoopbackOriginUsesHttp() {
-		assertEquals("http://localhost", FidoAuthenticator.originFor("localhost"));
-		assertEquals("http://127.0.0.1", FidoAuthenticator.originFor("127.0.0.1"));
-		assertEquals("http://[::1]", FidoAuthenticator.originFor("::1"));
-		assertEquals("https://ghidra.example.org", FidoAuthenticator.originFor("ghidra.example.org"));
+		assertEquals("http://localhost", FidoRpId.originFor("localhost"));
+		assertEquals("http://127.0.0.1", FidoRpId.originFor("127.0.0.1"));
+		assertEquals("http://[::1]", FidoRpId.originFor("::1"));
+		assertEquals("https://ghidra.example.org", FidoRpId.originFor("ghidra.example.org"));
 	}
 
 	@Test
@@ -209,7 +210,7 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 		FidoAuthenticator auth =
 			new FidoAuthenticator(new FidoAuthenticator.ProcessFidoHelper(script));
 		FidoAuthenticationCallback cb = newCallback(false);
-		auth.complete(cb, "alice", null, new byte[][] { CRED_ID });
+		auth.complete(cb, "alice", null, new byte[][] { CRED_ID }, null, null);
 		assertArrayEquals(CRED_ID, cb.getCredentialId());
 		assertArrayEquals(SIGNATURE, cb.getSignature());
 	}
@@ -229,7 +230,7 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 			new FidoAuthenticator(new FidoAuthenticator.ProcessFidoHelper(script));
 		FidoAuthenticationCallback cb = newCallback(false);
 		try {
-			auth.complete(cb, "alice", null, new byte[][] { CRED_ID });
+			auth.complete(cb, "alice", null, new byte[][] { CRED_ID }, null, null);
 			fail("expected IOException");
 		}
 		catch (IOException e) {
@@ -248,7 +249,7 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 			return "{}";
 		});
 		try {
-			auth.complete(newCallback(false), "  ", null, null);
+			auth.complete(newCallback(false), "  ", null, null, null, null);
 			fail("expected IOException");
 		}
 		catch (IOException e) {

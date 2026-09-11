@@ -20,6 +20,7 @@ import static org.junit.Assert.*;
 import org.junit.Test;
 
 import generic.test.AbstractGenericTest;
+import ghidra.framework.remote.FidoRpId;
 
 public class FidoRpIdTest extends AbstractGenericTest {
 
