@@ -24,6 +24,10 @@ public class FidoCredential {
 	private String credentialId;
 	private String publicKeyCose;
 	private long signCount;
+	/**
+	 * Authenticator AAGUID. Informational only: not authenticated under
+	 * {@code fmt=none} attestation and must not be used for policy.
+	 */
 	private String aaguid;
 	private long createdEpochMs;
 

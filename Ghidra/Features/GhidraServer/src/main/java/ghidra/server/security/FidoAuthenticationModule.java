@@ -33,6 +33,7 @@ import org.apache.logging.log4j.Logger;
 
 import ghidra.framework.remote.FidoAuthenticationCallback;
 import ghidra.framework.remote.GhidraPrincipal;
+import ghidra.server.RepositoryManager;
 import ghidra.server.UserManager;
 import ghidra.server.security.fido.FidoAssertionVerifier;
 import ghidra.server.security.fido.FidoAssertionVerifier.Enrollment;
@@ -63,6 +64,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 
 	private static final String AUTH_FAILED = "Authentication failed";
 	private static final byte[][] EMPTY_ALLOW = new byte[0][];
+	private static final int MAX_ENROLL_TOKEN_CHARS = 128;
 
 	private final String rpId;
 	private final String rpName;
@@ -113,6 +115,48 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 	}
 
 	/**
+	 * Production {@code -a5} requires an explicit {@code -ip}. Loopback literals
+	 * are allowed (tests/dev). Non-loopback IP addresses are rejected.
+	 * @param ipExplicit true if {@code -ip} was on the command line
+	 */
+	public static void requireExplicitRpId(boolean ipExplicit) {
+		if (!ipExplicit) {
+			throw new IllegalArgumentException(
+				"FIDO authentication (-a5) requires -ip <hostname>");
+		}
+		String rpId = resolveDefaultRpId();
+		if (FidoAssertionVerifier.isLoopbackRpId(rpId)) {
+			return;
+		}
+		if (isIpLiteral(rpId)) {
+			throw new IllegalArgumentException(
+				"FIDO RP ID must be a hostname, not an IP address");
+		}
+	}
+
+	static boolean isIpLiteral(String rpId) {
+		if (rpId == null || rpId.isBlank()) {
+			return false;
+		}
+		if (FidoAssertionVerifier.isLoopbackRpId(rpId)) {
+			return false;
+		}
+		if (rpId.indexOf(':') >= 0) {
+			return true;
+		}
+		String[] parts = rpId.split("\\.");
+		if (parts.length != 4) {
+			return false;
+		}
+		for (String part : parts) {
+			if (part.isEmpty() || !part.chars().allMatch(Character::isDigit)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
 	 * {@return the configured relying-party id}
 	 */
 	public String getRpId() {
@@ -131,7 +175,7 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 
 	@Override
 	public Callback[] getAuthenticationCallbacks() {
-		byte[] challenge = TokenGenerator.getNewToken();
+		byte[] challenge = TokenGenerator.getNewTokenForClient(RepositoryManager.getRMIClient());
 		FidoAuthenticationCallback fidoCb = new FidoAuthenticationCallback(rpId, rpName, challenge,
 			EMPTY_ALLOW, false, timeoutSeconds);
 		NameCallback nameCb = new NameCallback(USERNAME_CALLBACK_PROMPT + ":");
@@ -152,7 +196,10 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 	 */
 	public byte[][] getAllowCredentials(UserManager userMgr, String username, byte[] challenge) {
 		try {
-			if (!TokenGenerator.hasIssuedToken(challenge)) {
+			if (!TokenGenerator.hasIssuedForClient(challenge, RepositoryManager.getRMIClient())) {
+				return EMPTY_ALLOW;
+			}
+			if (!TokenGenerator.recordAllowLookup(challenge)) {
 				return EMPTY_ALLOW;
 			}
 			if (userMgr == null || username == null || !UserManager.isValidUserName(username)) {
@@ -212,6 +259,12 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 		fidoCb.clearAssertion();
 		fidoCb.clearAttestationObject();
 
+		if (enrollToken != null && enrollToken.length() > MAX_ENROLL_TOKEN_CHARS) {
+			fail(username, "enroll token too large");
+		}
+		if (!TokenGenerator.hasIssuedForClient(challenge, RepositoryManager.getRMIClient())) {
+			fail(username, "invalid or stale challenge");
+		}
 		if (!TokenGenerator.isValidToken(challenge)) {
 			fail(username, "invalid or stale challenge");
 		}
@@ -273,6 +326,9 @@ public class FidoAuthenticationModule implements AuthenticationModule {
 			throws FailedLoginException, VerificationException, IOException {
 		if (credentialId == null || credentialId.length == 0) {
 			fail(username, "credential id required");
+		}
+		if (credentialId.length > 1024) {
+			fail(username, "credential id too large");
 		}
 		FidoCredentialStore store = userMgr.getFidoCredentialStore();
 		List<FidoCredential> credentials = store.loadCredentials(username);

@@ -267,6 +267,20 @@ public class FidoAuthenticationModuleTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testAllowCredentialsLookupRateLimited() throws Exception {
+		storeCredential(0);
+		byte[] challenge = fido(module.getAuthenticationCallbacks()).getChallenge();
+		for (int i = 0; i < 8; i++) {
+			assertEquals(1, module.getAllowCredentials(userMgr(), USER, challenge).length);
+		}
+		assertEquals(0, module.getAllowCredentials(userMgr(), USER, challenge).length);
+		Callback[] callbacks = module.getAuthenticationCallbacks();
+		fillName(callbacks, USER);
+		fillAssertion(callbacks, 1);
+		assertEquals(USER, module.authenticate(userMgr(), subject(USER), callbacks));
+	}
+
+	@Test
 	public void testGetAllowCredentialsEmptyWithoutLiveChallenge() throws Exception {
 		storeCredential(0);
 		assertEquals(0, module.getAllowCredentials(userMgr(), USER, null).length);
@@ -276,6 +290,44 @@ public class FidoAuthenticationModuleTest extends AbstractGenericTest {
 	@Test
 	public void testRpIdNormalizedToLowercase() {
 		assertEquals("localhost", new FidoAuthenticationModule("LocalHost").getRpId());
+	}
+
+	@Test
+	public void testRequireExplicitRpId() {
+		String previous = System.getProperty(FidoAuthenticationModule.RMI_SERVER_PROPERTY);
+		try {
+			System.clearProperty(FidoAuthenticationModule.RMI_SERVER_PROPERTY);
+			try {
+				FidoAuthenticationModule.requireExplicitRpId(false);
+				fail("expected IllegalArgumentException");
+			}
+			catch (IllegalArgumentException e) {
+				assertTrue(e.getMessage().contains("-ip"));
+			}
+
+			System.setProperty(FidoAuthenticationModule.RMI_SERVER_PROPERTY, "127.0.0.1");
+			FidoAuthenticationModule.requireExplicitRpId(true);
+
+			System.setProperty(FidoAuthenticationModule.RMI_SERVER_PROPERTY, "ghidra.example.org");
+			FidoAuthenticationModule.requireExplicitRpId(true);
+
+			System.setProperty(FidoAuthenticationModule.RMI_SERVER_PROPERTY, "10.1.2.3");
+			try {
+				FidoAuthenticationModule.requireExplicitRpId(true);
+				fail("expected IllegalArgumentException");
+			}
+			catch (IllegalArgumentException e) {
+				assertTrue(e.getMessage().contains("hostname"));
+			}
+		}
+		finally {
+			if (previous == null) {
+				System.clearProperty(FidoAuthenticationModule.RMI_SERVER_PROPERTY);
+			}
+			else {
+				System.setProperty(FidoAuthenticationModule.RMI_SERVER_PROPERTY, previous);
+			}
+		}
 	}
 
 	@Test

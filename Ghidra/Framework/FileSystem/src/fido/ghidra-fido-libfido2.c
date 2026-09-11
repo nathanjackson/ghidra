@@ -77,6 +77,9 @@ static void set_fido_err(char *err, size_t errlen, int r) {
 		case FIDO_ERR_TIMEOUT:
 			set_err(err, errlen, "FIDO helper timed out");
 			break;
+		case FIDO_ERR_UNSUPPORTED_OPTION:
+			set_err(err, errlen, "security key rejected a FIDO option (PIN or UV)");
+			break;
 		default:
 			if (err && errlen) {
 				snprintf(err, errlen, "security key assertion or enrollment failed (%s)",
@@ -230,28 +233,38 @@ static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 	const char *json_pin = (req->pin && req->pin[0]) ? req->pin : NULL;
 	char *pin = NULL;
 	int pin_owned = 0;
-	if (json_pin) {
-		pin = (char *)json_pin;
-	}
-	else if (fido_dev_has_pin(dev)) {
-		pin = read_pin_tty();
-		pin_owned = 1;
-		if (!pin) {
-			set_err(err, errlen, "security key PIN required");
-			goto done;
+	/*
+	 * uv=true without a PIN makes many keys (YubiKey) return
+	 * FIDO_ERR_UNSUPPORTED_OPTION instead of PIN_REQUIRED. Send a PIN on
+	 * the first attempt when this device has one; otherwise try without
+	 * and retry this device only.
+	 */
+	if (fido_dev_has_pin(dev)) {
+		if (json_pin) {
+			pin = (char *)json_pin;
+		}
+		else {
+			pin = read_pin_tty();
+			pin_owned = 1;
+			if (!pin) {
+				set_err(err, errlen, "security key PIN required");
+				goto done;
+			}
 		}
 	}
 	int r = fido_dev_get_assert(dev, assert, pin);
-	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && !json_pin) {
-		if (pin_owned) {
-			wipe_pin(pin);
-			pin_owned = 0;
+	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID ||
+		r == FIDO_ERR_UNSUPPORTED_OPTION) && pin == NULL) {
+		if (json_pin) {
+			pin = (char *)json_pin;
 		}
-		pin = read_pin_tty();
-		pin_owned = 1;
-		if (!pin) {
-			set_err(err, errlen, "security key PIN required");
-			goto done;
+		else {
+			pin = read_pin_tty();
+			pin_owned = 1;
+			if (!pin) {
+				set_err(err, errlen, "security key PIN required");
+				goto done;
+			}
 		}
 		r = fido_dev_get_assert(dev, assert, pin);
 	}
@@ -259,6 +272,11 @@ static int try_assert_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 		wipe_pin(pin);
 	}
 	pin = NULL;
+	if (r == FIDO_ERR_PIN_INVALID) {
+		set_fido_err(err, errlen, r);
+		fido_assert_free(&assert);
+		return -2;
+	}
 	if (r != FIDO_OK) {
 		set_fido_err(err, errlen, r);
 		goto done;
@@ -314,7 +332,8 @@ static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 		FIDO_OK) {
 		goto done;
 	}
-	if (fido_cred_set_rk(cred, FIDO_OPT_FALSE) != FIDO_OK) {
+	/* Omit rk; sending rk=false is CTAP UNSUPPORTED_OPTION on some keys. */
+	if (fido_cred_set_rk(cred, FIDO_OPT_OMIT) != FIDO_OK) {
 		goto done;
 	}
 	if (fido_cred_set_uv(cred, FIDO_OPT_TRUE) != FIDO_OK) {
@@ -325,28 +344,32 @@ static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 	const char *json_pin = (req->pin && req->pin[0]) ? req->pin : NULL;
 	char *pin = NULL;
 	int pin_owned = 0;
-	if (json_pin) {
-		pin = (char *)json_pin;
-	}
-	else if (fido_dev_has_pin(dev)) {
-		pin = read_pin_tty();
-		pin_owned = 1;
-		if (!pin) {
-			set_err(err, errlen, "security key PIN required");
-			goto done;
+	if (fido_dev_has_pin(dev)) {
+		if (json_pin) {
+			pin = (char *)json_pin;
+		}
+		else {
+			pin = read_pin_tty();
+			pin_owned = 1;
+			if (!pin) {
+				set_err(err, errlen, "security key PIN required");
+				goto done;
+			}
 		}
 	}
 	int r = fido_dev_make_cred(dev, cred, pin);
-	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID) && !json_pin) {
-		if (pin_owned) {
-			wipe_pin(pin);
-			pin_owned = 0;
+	if ((r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_PIN_AUTH_INVALID ||
+		r == FIDO_ERR_UNSUPPORTED_OPTION) && pin == NULL) {
+		if (json_pin) {
+			pin = (char *)json_pin;
 		}
-		pin = read_pin_tty();
-		pin_owned = 1;
-		if (!pin) {
-			set_err(err, errlen, "security key PIN required");
-			goto done;
+		else {
+			pin = read_pin_tty();
+			pin_owned = 1;
+			if (!pin) {
+				set_err(err, errlen, "security key PIN required");
+				goto done;
+			}
 		}
 		r = fido_dev_make_cred(dev, cred, pin);
 	}
@@ -354,6 +377,11 @@ static int try_create_dev(fido_dev_t *dev, const fido_request *req, fido_respons
 		wipe_pin(pin);
 	}
 	pin = NULL;
+	if (r == FIDO_ERR_PIN_INVALID) {
+		set_fido_err(err, errlen, r);
+		fido_cred_free(&cred);
+		return -2;
+	}
 	if (r != FIDO_OK) {
 		set_fido_err(err, errlen, r);
 		goto done;
@@ -417,7 +445,8 @@ static int with_devices(
 			(void) fido_dev_set_timeout(dev, req->timeout_ms);
 		}
 		last[0] = 0;
-		if (fn(dev, req, resp, last, sizeof(last)) == 0) {
+		int r = fn(dev, req, resp, last, sizeof(last));
+		if (r == 0) {
 			rc = 0;
 			fido_dev_close(dev);
 			fido_dev_free(&dev);
@@ -425,6 +454,9 @@ static int with_devices(
 		}
 		fido_dev_close(dev);
 		fido_dev_free(&dev);
+		if (r == -2) {
+			break;
+		}
 	}
 	fido_dev_info_free(&list, max);
 	if (rc != 0) {

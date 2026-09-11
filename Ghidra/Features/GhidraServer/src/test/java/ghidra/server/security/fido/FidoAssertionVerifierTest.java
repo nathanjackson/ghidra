@@ -166,6 +166,24 @@ public class FidoAssertionVerifierTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testAssertionSignCountEqualRejected() throws Exception {
+		byte[] authData = FidoWebAuthnFixtures.authenticatorData(RP_ID,
+			FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV, 5);
+		byte[] clientData =
+			FidoWebAuthnFixtures.clientDataJSON("webauthn.get", CHALLENGE, ORIGIN);
+		byte[] signature =
+			FidoWebAuthnFixtures.signEs256(es256.getPrivate(), authData, clientData);
+
+		try {
+			verifier.verifyAssertion(CHALLENGE, authData, clientData, signature, cose, 5);
+			fail("expected VerificationException");
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage().contains("signCount"));
+		}
+	}
+
+	@Test
 	public void testAssertionSignCountDecrease() throws Exception {
 		byte[] authData = FidoWebAuthnFixtures.authenticatorData(RP_ID,
 			FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV, 4);
@@ -237,6 +255,51 @@ public class FidoAssertionVerifierTest extends AbstractGenericTest {
 	public void testRpIdNormalizedToLowercase() {
 		FidoAssertionVerifier mixed = new FidoAssertionVerifier("LocalHost");
 		assertEquals("localhost", mixed.getRpId());
+	}
+
+	@Test
+	public void testAssertionAuthenticatorDataTooLarge() throws Exception {
+		byte[] huge = new byte[257];
+		Arrays.fill(huge, (byte) 0);
+		try {
+			verifier.verifyAssertion(CHALLENGE, huge, new byte[] { '{', '}' }, new byte[] { 1 },
+				cose, 0);
+			fail("expected VerificationException");
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage().contains("too large"));
+		}
+	}
+
+	@Test
+	public void testCoseAlgRequired() throws Exception {
+		byte[] noAlg = FidoWebAuthnFixtures.coseEs256WithoutAlg((ECPublicKey) es256.getPublic());
+		byte[] authData = FidoWebAuthnFixtures.authenticatorData(RP_ID,
+			FidoAssertionVerifier.FLAG_UP | FidoAssertionVerifier.FLAG_UV, 1);
+		byte[] clientData =
+			FidoWebAuthnFixtures.clientDataJSON("webauthn.get", CHALLENGE, ORIGIN);
+		byte[] signature =
+			FidoWebAuthnFixtures.signEs256(es256.getPrivate(), authData, clientData);
+		try {
+			verifier.verifyAssertion(CHALLENGE, authData, clientData, signature, noAlg, 0);
+			fail("expected VerificationException");
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage().contains("alg"));
+		}
+	}
+
+	@Test
+	public void testRs256RejectsShortModulus() throws Exception {
+		try {
+			FidoAssertionVerifier.parseCosePublicKey(FidoWebAuthnFixtures.coseRs256Raw(
+				new byte[64], new byte[] { 1, 0, 1 }));
+			fail("expected VerificationException");
+		}
+		catch (VerificationException e) {
+			assertTrue(e.getMessage().toLowerCase().contains("rs256") ||
+				e.getMessage().toLowerCase().contains("invalid"));
+		}
 	}
 
 	@Test

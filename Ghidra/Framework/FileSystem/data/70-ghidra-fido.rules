@@ -8,4 +8,5 @@
 #   sudo cp 70-ghidra-fido.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 
-KERNEL=="hidraw*", SUBSYSTEM=="hidraw", TAG+="uaccess", GROUP="plugdev", MODE="0660"
+# FIDO HID usage page (0xF1D0) is tagged ID_FIDO_APPLICATION by udev 188+.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{ID_FIDO_APPLICATION}=="1", TAG+="uaccess", GROUP="plugdev", MODE="0660"

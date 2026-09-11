@@ -56,6 +56,19 @@ public class FidoLoginDialogTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testRelyingPartyLabelShowsRpId() {
+		NameCallback nameCb = new NameCallback("User ID:");
+		nameCb.setName("alice");
+		dialog = newDialog(nameCb, newCallback(), new StubHelper(false), null);
+		SystemUtilities.runSwingNow(() -> {
+			assertNotNull(dialog.getRpIdLabel());
+			assertEquals("ghidra.example.org", dialog.getRpIdLabel().getText());
+			assertEquals("Relying party ID",
+				dialog.getRpIdLabel().getAccessibleContext().getAccessibleName());
+		});
+	}
+
+	@Test
 	public void testOkRunsHelperAndFillsCallback() throws Exception {
 		AtomicReference<String> userSeen = new AtomicReference<>();
 		StubHelper helper = new StubHelper(false);
@@ -166,7 +179,7 @@ public class FidoLoginDialogTest extends AbstractGenericTest {
 	private FidoLoginDialog newDialog(NameCallback nameCb, FidoAuthenticationCallback fidoCb,
 			FidoHelper helper, FidoAllowCredentialsLookup lookup) {
 		return SystemUtilities.runSwingNow(
-			() -> new FidoLoginDialog(nameCb, fidoCb, "server.example.test",
+			() -> new FidoLoginDialog(nameCb, fidoCb, "ghidra.example.org",
 				new FidoAuthenticator(helper), lookup, null));
 	}
 

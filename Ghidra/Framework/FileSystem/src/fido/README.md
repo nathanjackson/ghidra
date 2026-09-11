@@ -22,3 +22,13 @@ runs `build-fido-deps.sh` per Ghidra platform (cmake required).
 
 libfido2 is configured with USB HID only: `USE_HIDAPI=OFF`, `USE_PCSC=OFF`,
 `NFC_LINUX=OFF`.
+
+PIN handling (Linux/macOS): a PIN is sent on the first attempt when
+`fido_dev_has_pin` is true for that device (YubiKeys return
+`FIDO_ERR_UNSUPPORTED_OPTION` for `uv=true` without a PIN). Devices without
+a PIN are tried without one; `UNSUPPORTED_OPTION` / `PIN_REQUIRED` then retry
+that device with a PIN. A wrong PIN stops the device loop.
+
+`clientDataJSON` origin/type/challenge strings are JSON-escaped. Windows uses a
+helper-owned message-only window as the WebAuthn parent HWND, not the
+foreground window.

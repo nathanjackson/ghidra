@@ -157,6 +157,45 @@ public class FidoAuthenticatorTest extends AbstractGenericTest {
 	}
 
 	@Test
+	public void testMismatchedConnectedHostDoesNotInvokeHelper() throws Exception {
+		FidoAuthenticator auth = new FidoAuthenticator((json, timeoutMs) -> {
+			fail("helper should not run");
+			return "{}";
+		});
+		FidoAuthenticationCallback cb = newCallback(false);
+		try {
+			auth.complete(cb, "alice", null, new byte[][] { CRED_ID }, null, "evil.com");
+			fail("expected IOException");
+		}
+		catch (IOException e) {
+			assertEquals(FidoRpId.MISMATCH_MESSAGE, e.getMessage());
+		}
+		assertNull(cb.getCredentialId());
+	}
+
+	@Test
+	public void testMatchingConnectedHostInvokesHelper() throws Exception {
+		AtomicReference<String> seen = new AtomicReference<>();
+		FidoAuthenticator auth = new FidoAuthenticator((json, timeoutMs) -> {
+			seen.set(json);
+			return successJson(false).toString();
+		});
+		FidoAuthenticationCallback cb = newCallback(false);
+		auth.complete(cb, "alice", null, new byte[][] { CRED_ID }, null, RP_ID);
+		assertNotNull(seen.get());
+		assertArrayEquals(CRED_ID, cb.getCredentialId());
+	}
+
+	@Test
+	public void testLoopbackConnectedHostMatchesLocalhostRpId() throws Exception {
+		FidoAuthenticator auth = new FidoAuthenticator((json, timeoutMs) -> successJson(false).toString());
+		FidoAuthenticationCallback cb = new FidoAuthenticationCallback("localhost", RP_NAME,
+			CHALLENGE, new byte[][] { CRED_ID }, false, 60);
+		auth.complete(cb, "alice", null, new byte[][] { CRED_ID }, null, "127.0.0.1");
+		assertArrayEquals(CRED_ID, cb.getCredentialId());
+	}
+
+	@Test
 	public void testProcessHelperJsonRoundTrip() throws Exception {
 		File script = File.createTempFile("ghidra-fido-fake", ".sh");
 		script.deleteOnExit();

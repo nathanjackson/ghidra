@@ -58,13 +58,21 @@ static WCHAR *utf8_to_wide(const char *s) {
 	return w;
 }
 
-static HWND helper_hwnd(void) {
-	HWND hwnd = GetForegroundWindow();
+static HWND helper_hwnd(int *owned) {
+	HWND hwnd = CreateWindowExW(0, L"STATIC", L"ghidra-fido", 0, 0, 0, 0, 0, HWND_MESSAGE,
+		NULL, GetModuleHandleW(NULL), NULL);
 	if (hwnd) {
+		*owned = 1;
 		return hwnd;
 	}
-	hwnd = GetConsoleWindow();
-	return hwnd;
+	*owned = 0;
+	return GetConsoleWindow();
+}
+
+static void release_hwnd(HWND hwnd, int owned) {
+	if (owned && hwnd) {
+		DestroyWindow(hwnd);
+	}
 }
 
 static int fill_client_data(const fido_request *req, const char *type,
@@ -119,7 +127,10 @@ int fido_platform_assert(const fido_request *req, fido_response *resp, char *err
 	opt.dwUserVerificationRequirement = WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED;
 
 	WEBAUTHN_ASSERTION *assertion = NULL;
-	HRESULT hr = WebAuthNAuthenticatorGetAssertion(helper_hwnd(), rp, &cd, &opt, &assertion);
+	int hwnd_owned = 0;
+	HWND hwnd = helper_hwnd(&hwnd_owned);
+	HRESULT hr = WebAuthNAuthenticatorGetAssertion(hwnd, rp, &cd, &opt, &assertion);
+	release_hwnd(hwnd, hwnd_owned);
 	free(rp);
 	if (FAILED(hr) || !assertion) {
 		set_err(err, errlen, "security key assertion failed");
@@ -195,8 +206,11 @@ int fido_platform_create(const fido_request *req, fido_response *resp, char *err
 	opt.dwAttestationConveyancePreference = WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE;
 
 	WEBAUTHN_CREDENTIAL_ATTESTATION *att = NULL;
-	HRESULT hr = WebAuthNAuthenticatorMakeCredential(helper_hwnd(), &rp, &user, &params, &cd,
-		&opt, &att);
+	int hwnd_owned = 0;
+	HWND hwnd = helper_hwnd(&hwnd_owned);
+	HRESULT hr = WebAuthNAuthenticatorMakeCredential(hwnd, &rp, &user, &params, &cd, &opt,
+		&att);
+	release_hwnd(hwnd, hwnd_owned);
 	free(rp_id);
 	free(rp_name);
 	free(user_name);

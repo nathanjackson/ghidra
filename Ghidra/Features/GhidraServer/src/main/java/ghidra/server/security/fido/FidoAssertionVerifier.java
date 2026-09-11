@@ -61,6 +61,12 @@ public class FidoAssertionVerifier {
 
 	private static final int MAX_CLIENT_DATA_BYTES = 4096;
 	private static final int MAX_ATTESTATION_BYTES = 8192;
+	private static final int MAX_ASSERTION_AUTH_DATA_BYTES = 256;
+	private static final int MAX_ENROLL_AUTH_DATA_BYTES = 8192;
+	private static final int MAX_SIGNATURE_BYTES = 512;
+	private static final int MAX_CREDENTIAL_ID_BYTES = 1024;
+	private static final int MIN_RSA_MODULUS_BYTES = 256;
+	private static final BigInteger MIN_RSA_EXPONENT = BigInteger.valueOf(65537);
 
 	private final String rpId;
 	private final byte[] rpIdHash;
@@ -115,6 +121,12 @@ public class FidoAssertionVerifier {
 	public long verifyAssertion(byte[] challenge, byte[] authenticatorData, byte[] clientDataJSON,
 			byte[] signature, byte[] publicKeyCose, long storedSignCount)
 			throws VerificationException {
+		if (authenticatorData != null && authenticatorData.length > MAX_ASSERTION_AUTH_DATA_BYTES) {
+			throw new VerificationException("authenticatorData too large");
+		}
+		if (signature != null && signature.length > MAX_SIGNATURE_BYTES) {
+			throw new VerificationException("signature too large");
+		}
 		verifyClientData(clientDataJSON, challenge, TYPE_GET);
 		ParsedAuthData authData = parseAuthenticatorData(authenticatorData, false);
 		verifySignCount(storedSignCount, authData.signCount);
@@ -142,6 +154,9 @@ public class FidoAssertionVerifier {
 		if (attestationObject.length > MAX_ATTESTATION_BYTES) {
 			throw new VerificationException("attestation object too large");
 		}
+		if (authenticatorData != null && authenticatorData.length > MAX_ENROLL_AUTH_DATA_BYTES) {
+			throw new VerificationException("authenticatorData too large");
+		}
 		verifyClientData(clientDataJSON, challenge, TYPE_CREATE);
 
 		CborDecoder decoder = new CborDecoder(attestationObject, 0);
@@ -151,6 +166,9 @@ public class FidoAssertionVerifier {
 		byte[] attAuthData = bytesValue(attObj.get("authData"));
 		if (attAuthData == null) {
 			throw new VerificationException("attestation authData required");
+		}
+		if (attAuthData.length > MAX_ENROLL_AUTH_DATA_BYTES) {
+			throw new VerificationException("authenticatorData too large");
 		}
 		if (authenticatorData != null &&
 			!MessageDigest.isEqual(authenticatorData, attAuthData)) {
@@ -256,7 +274,7 @@ public class FidoAssertionVerifier {
 			"https://127.0.0.1".equals(origin) || "https://[::1]".equals(origin);
 	}
 
-	static boolean isLoopbackRpId(String rpId) {
+	public static boolean isLoopbackRpId(String rpId) {
 		String n = rpId.toLowerCase(Locale.ROOT);
 		return "localhost".equals(n) || "127.0.0.1".equals(n) || "::1".equals(n) ||
 			"[::1]".equals(n);
@@ -298,7 +316,8 @@ public class FidoAssertionVerifier {
 		offset += AAGUID_LEN;
 		int credIdLen = ((authData[offset] & 0xff) << 8) | (authData[offset + 1] & 0xff);
 		offset += 2;
-		if (credIdLen <= 0 || authData.length < offset + credIdLen) {
+		if (credIdLen <= 0 || credIdLen > MAX_CREDENTIAL_ID_BYTES ||
+			authData.length < offset + credIdLen) {
 			throw new VerificationException("credential id truncated");
 		}
 		byte[] credentialId = Arrays.copyOfRange(authData, offset, offset + credIdLen);
@@ -312,8 +331,10 @@ public class FidoAssertionVerifier {
 
 	static void verifySignCount(long storedSignCount, long newSignCount)
 			throws VerificationException {
-		if (storedSignCount > 0 && newSignCount < storedSignCount) {
-			throw new VerificationException("signCount decreased");
+		if (storedSignCount > 0 || newSignCount > 0) {
+			if (newSignCount <= storedSignCount) {
+				throw new VerificationException("signCount decreased");
+			}
 		}
 	}
 
@@ -329,8 +350,11 @@ public class FidoAssertionVerifier {
 		if (kty == null) {
 			throw new VerificationException("COSE kty required");
 		}
+		if (alg == null) {
+			throw new VerificationException("COSE alg required");
+		}
 		if (kty.intValue() == KTY_EC2) {
-			if (alg != null && alg.intValue() != ALG_ES256) {
+			if (alg.intValue() != ALG_ES256) {
 				throw new VerificationException("unsupported COSE alg");
 			}
 			Long crv = longValue(mapGet(map, COSE_CRV_OR_N));
@@ -341,7 +365,7 @@ public class FidoAssertionVerifier {
 				bytesValue(mapGet(map, COSE_Y)));
 		}
 		if (kty.intValue() == KTY_RSA) {
-			if (alg != null && alg.intValue() != ALG_RS256) {
+			if (alg.intValue() != ALG_RS256) {
 				throw new VerificationException("unsupported COSE alg");
 			}
 			return parseRs256(bytesValue(mapGet(map, COSE_CRV_OR_N)),
@@ -367,13 +391,20 @@ public class FidoAssertionVerifier {
 	}
 
 	private static PublicKey parseRs256(byte[] n, byte[] e) throws VerificationException {
-		if (n == null || e == null || n.length == 0 || e.length == 0) {
+		if (n == null || e == null || n.length < MIN_RSA_MODULUS_BYTES || e.length == 0) {
 			throw new VerificationException("invalid RS256 public key");
 		}
 		try {
+			BigInteger exponent = new BigInteger(1, e);
+			if (exponent.compareTo(MIN_RSA_EXPONENT) < 0) {
+				throw new VerificationException("invalid RS256 public key");
+			}
 			RSAPublicKeySpec spec =
-				new RSAPublicKeySpec(new BigInteger(1, n), new BigInteger(1, e));
+				new RSAPublicKeySpec(new BigInteger(1, n), exponent);
 			return KeyFactory.getInstance("RSA").generatePublic(spec);
+		}
+		catch (VerificationException ex) {
+			throw ex;
 		}
 		catch (GeneralSecurityException ex) {
 			throw new VerificationException("invalid RS256 public key");
@@ -541,6 +572,10 @@ public class FidoAssertionVerifier {
 			return signCount;
 		}
 
+		/**
+		 * {@return a copy of the AAGUID from attested credential data}
+		 * Informational only under {@code fmt=none}; do not use for authenticator policy.
+		 */
 		public byte[] getAaguid() {
 			return aaguid.clone();
 		}

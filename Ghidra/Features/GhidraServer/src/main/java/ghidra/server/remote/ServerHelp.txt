@@ -7,7 +7,9 @@ Command line parameters:
 						
  
    -ip <hostname> : identifies the remote access IPv4 address or hostname (FQDN) which should be 
-   	                used by remote clients to access the server.
+   	                used by remote clients to access the server. Required for -a5 FIDO2; that
+   	                value is the WebAuthn relying-party ID and must be a hostname (loopback
+   	                literals are allowed for local testing).
    	                 
    -i #.#.#.# : server interface IPv4 address to listen on (default will listen on all interfaces).
 	
@@ -21,8 +23,8 @@ Command line parameters:
          1 - Active Directory via Kerberos.  Requires -d<your.ad_domainname.tld>
          2 - PKI Authentication
          4 - JAAS Authentication.  See also -jaas <config_file>
-         5 - FIDO2 Authentication.  Relying party ID is java.rmi.server.hostname (set via -ip).
-             -anonymous is not allowed.  -ssh is ignored.
+         5 - FIDO2 Authentication.  Requires -ip <hostname> (WebAuthn relying-party ID).
+             Clients must connect using that hostname. -anonymous is not allowed.  -ssh is ignored.
              Enroll/list/revoke keys with svrAdmin -fido-enroll / -fido-list / -fido-revoke.
          
    -d<ad_domain> : the Active Directory domain name.  Example: "-dmydomain.com"

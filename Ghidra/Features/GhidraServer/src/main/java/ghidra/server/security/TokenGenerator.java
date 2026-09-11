@@ -27,19 +27,33 @@ public class TokenGenerator {
 
 	private static final int TOKEN_SIZE = 64;
 
+	static final int MAX_IN_FLIGHT = 1024;
+	static final int MAX_ALLOW_LOOKUPS = 8;
+
 	private static CachedTokenSet tokenCache = new CachedTokenSet();
 
 	/**
 	 * {@return a single-use token byte sequence with embedded timestamp}
 	 */
 	static byte[] getNewToken() {
+		return getNewTokenForClient(null);
+	}
+
+	/**
+	 * Issue a token bound to {@code clientHost}. A null host is unbound (unit tests
+	 * and PKI/SSH). Bound tokens reject allow-list lookups and consume from a
+	 * different host.
+	 * @param clientHost canonical RMI client host, or null
+	 * @return a single-use token byte sequence with embedded timestamp
+	 */
+	static byte[] getNewTokenForClient(String clientHost) {
 		SecureRandom random = SecureRandomFactory.getSecureRandom();
 		byte[] token = new byte[TOKEN_SIZE - 8];
 		random.nextBytes(token);
 		byte[] stampedToken = new byte[TOKEN_SIZE];
 		System.arraycopy(token, 0, stampedToken, 8, token.length);
 		putLong(stampedToken, 0, (new Date()).getTime());
-		tokenCache.add(stampedToken);
+		tokenCache.add(stampedToken, clientHost);
 		return stampedToken;
 	}
 
@@ -64,10 +78,49 @@ public class TokenGenerator {
 	 * @param token token previously issued
 	 */
 	static boolean hasIssuedToken(byte[] token) {
-		if (token == null || token.length != TOKEN_SIZE || !tokenCache.contains(token)) {
+		return hasIssuedForClient(token, null);
+	}
+
+	/**
+	 * {@return true if the token is cached, unexpired, and issued to {@code clientHost}}
+	 * Unbound tokens (null stored host) match any caller. A bound token matches
+	 * only the same host. A null {@code clientHost} matches only unbound tokens.
+	 */
+	static boolean hasIssuedForClient(byte[] token, String clientHost) {
+		if (token == null || token.length != TOKEN_SIZE) {
 			return false;
 		}
-		return hasValidTimestamp(token);
+		TokenRecord record = tokenCache.get(token);
+		if (record == null || record.expired()) {
+			return false;
+		}
+		if (!hasValidTimestamp(token)) {
+			return false;
+		}
+		if (record.clientHost == null) {
+			return true;
+		}
+		return record.clientHost.equals(clientHost);
+	}
+
+	/**
+	 * Count one allow-list lookup against {@code token}. {@return false} if the
+	 * token is missing, expired, or already at {@link #MAX_ALLOW_LOOKUPS}.
+	 * Does not consume the token.
+	 */
+	static boolean recordAllowLookup(byte[] token) {
+		if (token == null || token.length != TOKEN_SIZE) {
+			return false;
+		}
+		return tokenCache.recordAllowLookup(token);
+	}
+
+	static int inFlightCount() {
+		return tokenCache.size();
+	}
+
+	static void resetForTest() {
+		tokenCache.clear();
 	}
 
 	private static boolean hasValidTimestamp(byte[] token) {
@@ -134,9 +187,24 @@ public class TokenGenerator {
 	 * {@link CachedTokenSet} tracks timed token issuance and insures that they remain
 	 * valid for one-time consumption within limited life-span.
 	 */
+	private static class TokenRecord {
+		final long issuedAt;
+		final String clientHost;
+		int allowLookups;
+
+		TokenRecord(String clientHost) {
+			this.issuedAt = System.currentTimeMillis();
+			this.clientHost = clientHost;
+		}
+
+		boolean expired() {
+			return System.currentTimeMillis() - issuedAt >= MAX_TTL_MS;
+		}
+	}
+
 	private static class CachedTokenSet {
 
-		private final Map<Token, Long> cache = new ConcurrentHashMap<>();
+		private final Map<Token, TokenRecord> cache = new ConcurrentHashMap<>();
 		private final ScheduledExecutorService scheduler =
 			Executors.newSingleThreadScheduledExecutor();
 
@@ -145,28 +213,56 @@ public class TokenGenerator {
 			scheduler.scheduleAtFixedRate(this::cleanup, 5, 5, TimeUnit.SECONDS);
 		}
 
-		void add(byte[] token) {
-			cache.put(new Token(token), System.currentTimeMillis());
+		synchronized void add(byte[] token, String clientHost) {
+			cleanup();
+			if (cache.size() >= MAX_IN_FLIGHT) {
+				throw new IllegalStateException("too many in-flight authentication challenges");
+			}
+			cache.put(new Token(token), new TokenRecord(clientHost));
 		}
 
 		boolean consume(byte[] token) {
-			Long storedAt = cache.remove(new Token(token)); // remove on retrieval
-			if (storedAt == null)
+			TokenRecord record = cache.remove(new Token(token));
+			if (record == null) {
 				return false;
-			return (System.currentTimeMillis() - storedAt < MAX_TTL_MS);
+			}
+			return !record.expired();
 		}
 
 		boolean contains(byte[] token) {
-			Long storedAt = cache.get(new Token(token));
-			if (storedAt == null) {
+			TokenRecord record = cache.get(new Token(token));
+			return record != null && !record.expired();
+		}
+
+		TokenRecord get(byte[] token) {
+			return cache.get(new Token(token));
+		}
+
+		boolean recordAllowLookup(byte[] token) {
+			TokenRecord record = cache.get(new Token(token));
+			if (record == null || record.expired()) {
 				return false;
 			}
-			return (System.currentTimeMillis() - storedAt < MAX_TTL_MS);
+			synchronized (record) {
+				if (record.allowLookups >= MAX_ALLOW_LOOKUPS) {
+					return false;
+				}
+				record.allowLookups++;
+				return true;
+			}
+		}
+
+		int size() {
+			return cache.size();
+		}
+
+		void clear() {
+			cache.clear();
 		}
 
 		private void cleanup() {
 			long now = System.currentTimeMillis();
-			cache.entrySet().removeIf(e -> now - e.getValue() >= MAX_TTL_MS);
+			cache.entrySet().removeIf(e -> now - e.getValue().issuedAt >= MAX_TTL_MS);
 		}
 	}
 }

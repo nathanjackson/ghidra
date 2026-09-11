@@ -64,12 +64,29 @@ final class FidoWebAuthnFixtures {
 	}
 
 	static byte[] coseRs256(RSAPublicKey pub) {
+		return coseRs256Raw(unsignedBytes(pub.getModulus()),
+			unsignedBytes(pub.getPublicExponent()));
+	}
+
+	static byte[] coseRs256Raw(byte[] n, byte[] e) {
 		CborWriter w = new CborWriter();
 		w.map(4);
 		w.integer(1).integer(3);
 		w.integer(3).integer(-257);
-		w.integer(-1).bytes(unsignedBytes(pub.getModulus()));
-		w.integer(-2).bytes(unsignedBytes(pub.getPublicExponent()));
+		w.integer(-1).bytes(n);
+		w.integer(-2).bytes(e);
+		return w.toByteArray();
+	}
+
+	static byte[] coseEs256WithoutAlg(ECPublicKey pub) {
+		byte[] x = unsignedCoord(pub.getW().getAffineX(), 32);
+		byte[] y = unsignedCoord(pub.getW().getAffineY(), 32);
+		CborWriter w = new CborWriter();
+		w.map(4);
+		w.integer(1).integer(2);
+		w.integer(-1).integer(1);
+		w.integer(-2).bytes(x);
+		w.integer(-3).bytes(y);
 		return w.toByteArray();
 	}
 

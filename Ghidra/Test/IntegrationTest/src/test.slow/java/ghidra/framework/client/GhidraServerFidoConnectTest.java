@@ -66,6 +66,7 @@ public class GhidraServerFidoConnectTest extends AbstractGhidraHeadlessIntegrati
 
 	@Test
 	public void testEnrollLoginAndNegativeCases() throws Exception {
+		// Server -ip is 127.0.0.1; client ServerInfo host is localhost (loopback alias).
 		startFidoServer();
 		MockEs256FidoHelper helper = new MockEs256FidoHelper();
 

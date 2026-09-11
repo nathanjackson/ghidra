@@ -20,7 +20,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.StringUtils;
@@ -90,7 +89,7 @@ public class FidoAuthenticator {
 	 */
 	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
 			byte[][] allowCredentials) throws IOException {
-		complete(fidoCb, userName, enrollToken, allowCredentials, null);
+		complete(fidoCb, userName, enrollToken, allowCredentials, null, null);
 	}
 
 	/**
@@ -99,11 +98,29 @@ public class FidoAuthenticator {
 	 */
 	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
 			byte[][] allowCredentials, char[] pin) throws IOException {
+		complete(fidoCb, userName, enrollToken, allowCredentials, pin, null);
+	}
+
+	/**
+	 * Run assert or create and store the result on {@code fidoCb}.
+	 * {@code connectedHost} is the hostname the client used to reach the server.
+	 * The helper is not spawned unless it matches {@code fidoCb.getRpId()}
+	 * (loopback aliases are equivalent). A null host is treated as the callback
+	 * rpId (unit tests of the helper protocol).
+	 * @param pin security-key PIN for libfido2; may be null or empty. Not logged.
+	 * @param connectedHost host the client connected to; null uses callback rpId
+	 */
+	public void complete(FidoAuthenticationCallback fidoCb, String userName, String enrollToken,
+			byte[][] allowCredentials, char[] pin, String connectedHost) throws IOException {
 		if (fidoCb == null) {
 			throw new IllegalArgumentException("fidoCb is required");
 		}
 		if (StringUtils.isBlank(userName)) {
 			throw new IOException("User ID is required");
+		}
+		String host = StringUtils.isBlank(connectedHost) ? fidoCb.getRpId() : connectedHost;
+		if (!FidoRpId.matchesConnectedHost(fidoCb.getRpId(), host)) {
+			throw new IOException(FidoRpId.MISMATCH_MESSAGE);
 		}
 		boolean create = !StringUtils.isBlank(enrollToken);
 		int timeoutMs = timeoutMs(fidoCb.getTimeoutSeconds());
@@ -145,7 +162,7 @@ public class FidoAuthenticator {
 		if (fidoCb.getRpName() != null) {
 			obj.addProperty("rpName", fidoCb.getRpName());
 		}
-		obj.addProperty("origin", originFor(fidoCb.getRpId()));
+		obj.addProperty("origin", FidoRpId.originFor(fidoCb.getRpId()));
 		obj.addProperty("challenge", encodeBase64Url(fidoCb.getChallenge()));
 		obj.addProperty("timeoutMs", timeoutMs);
 		obj.addProperty("userName", userName);
@@ -208,26 +225,7 @@ public class FidoAuthenticator {
 	 * @param rpId relying-party id
 	 */
 	public static String originFor(String rpId) {
-		if (rpId == null) {
-			return "https://localhost";
-		}
-		String n = rpId.trim().toLowerCase(Locale.ROOT);
-		if (isLoopbackRpId(n)) {
-			if ("127.0.0.1".equals(n)) {
-				return "http://127.0.0.1";
-			}
-			if ("::1".equals(n) || "[::1]".equals(n)) {
-				return "http://[::1]";
-			}
-			return "http://localhost";
-		}
-		return "https://" + n;
-	}
-
-	static boolean isLoopbackRpId(String rpId) {
-		String n = rpId.toLowerCase(Locale.ROOT);
-		return "localhost".equals(n) || "127.0.0.1".equals(n) || "::1".equals(n) ||
-			"[::1]".equals(n);
+		return FidoRpId.originFor(rpId);
 	}
 
 	static byte[] userIdFor(String userName) {

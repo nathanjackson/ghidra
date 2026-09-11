@@ -52,6 +52,7 @@ import ghidra.net.*;
 import ghidra.server.RepositoryManager;
 import ghidra.server.UserManager;
 import ghidra.server.security.*;
+import ghidra.server.security.fido.FidoAssertionVerifier;
 import ghidra.server.stream.BlockStreamServer;
 import ghidra.server.stream.RemoteBlockStreamHandle;
 import ghidra.util.SystemUtilities;
@@ -575,6 +576,7 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 		boolean autoProvision = false;
 		File jaasConfigFile = null;
 		Set<String> altNames = new TreeSet<>();
+		boolean ipExplicit = false;
 
 		// Network name resolution disabled by default
 		InetNameLookup.setLookupEnabled(false);
@@ -657,6 +659,7 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 					System.exit(-1);
 				}
 				System.setProperty(RMI_SERVER_PROPERTY, hostname);
+				ipExplicit = true;
 			}
 			else if (s.startsWith("-i")) {  // setting server bind address
 				int nextArgIndex = i + 1;
@@ -780,6 +783,16 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 			System.exit(-1);
 		}
 
+		if (authMode == FIDO_LOGIN) {
+			try {
+				FidoAuthenticationModule.requireExplicitRpId(ipExplicit);
+			}
+			catch (IllegalArgumentException e) {
+				displayUsage(e.getMessage());
+				System.exit(-1);
+			}
+		}
+
 		try {
 			serverRoot = serverRoot.getCanonicalFile();
 		}
@@ -879,7 +892,12 @@ public class GhidraServer extends UnicastRemoteObject implements GhidraServerHan
 			}
 			if (authMode == FIDO_LOGIN) {
 				log.info("   Prompt for user ID: yes");
-				log.info("   FIDO RP ID: " + FidoAuthenticationModule.resolveDefaultRpId());
+				String fidoRpId = FidoAuthenticationModule.resolveDefaultRpId();
+				log.info("   FIDO RP ID: " + fidoRpId);
+				if (FidoAssertionVerifier.isLoopbackRpId(fidoRpId)) {
+					log.warn(
+						"   FIDO RP ID is loopback; credentials will not work from other hosts");
+				}
 			}
 			else if (authMode != PKI_LOGIN) {
 				log.info("   Prompt for user ID: " + (nameCallbackAllowed ? "yes" : "no"));

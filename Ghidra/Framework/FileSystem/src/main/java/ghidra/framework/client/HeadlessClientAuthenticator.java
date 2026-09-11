@@ -20,6 +20,7 @@ import java.io.*;
 import java.net.*;
 import java.security.InvalidKeyException;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 import javax.security.auth.callback.*;
@@ -46,6 +47,11 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 	static final String FIDO_ENROLL_TOKEN_ENV = "GHIDRA_FIDO_ENROLL_TOKEN";
 	static final String FIDO_PIN_ENV = "GHIDRA_FIDO_PIN";
 	static final String FIDO_TOUCH_PROMPT = "Touch your security key";
+	static final String FIDO_RP_PROMPT_PREFIX = "FIDO relying party: ";
+	static final String FIDO_ENV_SECRET_WARNING =
+		"Warning: GHIDRA_FIDO_PIN / GHIDRA_FIDO_ENROLL_TOKEN are visible in the process environment";
+
+	private static final AtomicBoolean FIDO_ENV_WARNED = new AtomicBoolean();
 
 	private static Object sshPrivateKey;
 	private static String preferredName = null;
@@ -401,11 +407,18 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 		}
 		String enrollToken = envValue(FIDO_ENROLL_TOKEN_ENV);
 		char[] pin = resolveFidoPin();
+		if ((enrollToken != null || (pin != null && pin.length > 0)) &&
+			envUsed(FIDO_ENROLL_TOKEN_ENV, FIDO_PIN_ENV)) {
+			warnFidoEnvSecrets();
+		}
 		try {
+			if (fidoCb.getRpId() != null) {
+				System.err.println(FIDO_RP_PROMPT_PREFIX + fidoCb.getRpId());
+			}
 			System.err.println(FIDO_TOUCH_PROMPT);
 			System.err.flush();
 			byte[][] allow = allowCredentials(userName, fidoCb, allowLookup);
-			fidoAuthenticator.complete(fidoCb, userName, enrollToken, allow, pin);
+			fidoAuthenticator.complete(fidoCb, userName, enrollToken, allow, pin, serverName);
 			return true;
 		}
 		catch (IOException e) {
@@ -456,6 +469,22 @@ public class HeadlessClientAuthenticator implements ClientAuthenticator {
 			return null;
 		}
 		return value.trim();
+	}
+
+	private boolean envUsed(String... names) {
+		for (String name : names) {
+			if (!StringUtils.isBlank(envLookup.apply(name))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static void warnFidoEnvSecrets() {
+		if (FIDO_ENV_WARNED.compareAndSet(false, true)) {
+			System.err.println(FIDO_ENV_SECRET_WARNING);
+			System.err.flush();
+		}
 	}
 
 	private static byte[][] allowCredentials(String userName, FidoAuthenticationCallback fidoCb,

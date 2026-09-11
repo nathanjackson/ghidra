@@ -315,6 +315,7 @@ class ServerConnectTask extends Task {
 								pkiSignatureCb);
 						}
 						else if (fidoCb != null) {
+							loopOK = false;
 							if (nameCb != null) {
 								String username = nameCb.getName();
 								if (username == null || username.isBlank()) {

@@ -36,6 +36,7 @@ import com.google.gson.JsonParser;
 
 import generic.test.AbstractGenericTest;
 import ghidra.framework.client.fido.FidoAuthenticator;
+import ghidra.framework.client.fido.FidoRpId;
 import ghidra.framework.remote.FidoAuthenticationCallback;
 
 public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
@@ -67,7 +68,7 @@ public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 		PrintStream oldErr = System.err;
 		System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
 		try {
-			assertTrue(auth.processFidoCallback(nameCb, fido, "server.example.test"));
+			assertTrue(auth.processFidoCallback(nameCb, fido, RP_ID));
 		}
 		finally {
 			System.setErr(oldErr);
@@ -77,8 +78,9 @@ public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 		assertArrayEquals(CRED_ID, fido.getCredentialId());
 		assertArrayEquals(SIGNATURE, fido.getSignature());
 		assertNull(fido.getAttestationObject());
-		assertTrue(err.toString(StandardCharsets.UTF_8)
-				.contains(HeadlessClientAuthenticator.FIDO_TOUCH_PROMPT));
+		String errText = err.toString(StandardCharsets.UTF_8);
+		assertTrue(errText.contains(HeadlessClientAuthenticator.FIDO_TOUCH_PROMPT));
+		assertTrue(errText.contains(HeadlessClientAuthenticator.FIDO_RP_PROMPT_PREFIX + RP_ID));
 
 		JsonObject req = JsonParser.parseString(seen.get()).getAsJsonObject();
 		assertEquals("assert", req.get("op").getAsString());
@@ -95,7 +97,7 @@ public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 		NameCallback nameCb = new NameCallback("User ID:", "bob");
 		FidoAuthenticationCallback fido = newCallback();
 
-		assertTrue(auth.processFidoCallback(nameCb, fido, "server.example.test"));
+		assertTrue(auth.processFidoCallback(nameCb, fido, RP_ID));
 
 		assertEquals("bob", nameCb.getName());
 		assertArrayEquals(ATTESTATION, fido.getAttestationObject());
@@ -116,15 +118,16 @@ public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 		}) {
 			@Override
 			public void complete(FidoAuthenticationCallback fidoCb, String userName,
-					String enrollToken, byte[][] allowCredentials, char[] pin) throws IOException {
+					String enrollToken, byte[][] allowCredentials, char[] pin, String connectedHost)
+					throws IOException {
 				pinSeen.set(pin);
-				super.complete(fidoCb, userName, enrollToken, allowCredentials, pin);
+				super.complete(fidoCb, userName, enrollToken, allowCredentials, pin, connectedHost);
 			}
 		};
 		Map<String, String> env = Map.of(HeadlessClientAuthenticator.FIDO_PIN_ENV, PIN);
 		HeadlessClientAuthenticator auth = new HeadlessClientAuthenticator(authenticator, env::get);
 		assertTrue(auth.processFidoCallback(new NameCallback("User ID:", "alice"), newCallback(),
-			"server.example.test"));
+			RP_ID));
 
 		char[] pin = pinSeen.get();
 		assertNotNull(pin);
@@ -139,7 +142,7 @@ public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 		AtomicReference<String> seen = new AtomicReference<>();
 		HeadlessClientAuthenticator auth = newAuthenticator(seen, false, Map.of());
 		FidoAuthenticationCallback fido = newCallback();
-		assertTrue(auth.processFidoCallback(null, fido, "server.example.test"));
+		assertTrue(auth.processFidoCallback(null, fido, RP_ID));
 
 		JsonObject req = JsonParser.parseString(seen.get()).getAsJsonObject();
 		assertEquals(ClientUtil.getUserName(), req.get("userName").getAsString());
@@ -155,12 +158,27 @@ public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 		HeadlessClientAuthenticator auth = new HeadlessClientAuthenticator(authenticator, env::get);
 		try {
 			auth.processFidoCallback(new NameCallback("User ID:", "alice"), newCallback(),
-				"server.example.test");
+				RP_ID);
 			fail("expected IOException");
 		}
 		catch (IOException e) {
 			assertFalse(e.getMessage().contains(PIN));
 		}
+	}
+
+	@Test
+	public void testHeadlessMismatchedHostFailsBeforeHelper() throws Exception {
+		AtomicReference<String> seen = new AtomicReference<>();
+		HeadlessClientAuthenticator auth = newAuthenticator(seen, false, Map.of());
+		try {
+			auth.processFidoCallback(new NameCallback("User ID:", "alice"), newCallback(),
+				"evil.com");
+			fail("expected IOException");
+		}
+		catch (IOException e) {
+			assertEquals(FidoRpId.MISMATCH_MESSAGE, e.getMessage());
+		}
+		assertNull(seen.get());
 	}
 
 	@Test
@@ -175,7 +193,7 @@ public class HeadlessClientAuthenticatorFidoTest extends AbstractGenericTest {
 			new ClientFidoAuthenticatorTest.FakeHandle(new byte[][] { CRED_ID });
 
 		assertTrue(ClientUtil.processFidoCallback(new Callback[] { nameCb, fido },
-			"server.example.test", "alice", handle, null));
+			RP_ID, "alice", handle, null));
 
 		JsonObject req = JsonParser.parseString(seen.get()).getAsJsonObject();
 		assertEquals(1, req.getAsJsonArray("allowCredentials").size());

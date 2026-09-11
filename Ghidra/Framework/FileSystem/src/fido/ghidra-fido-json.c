@@ -554,19 +554,101 @@ int fido_write_error(const char *msg) {
 	return 0;
 }
 
+static size_t json_escaped_len(const char *s) {
+	size_t n = 0;
+	if (!s) {
+		return 0;
+	}
+	for (; *s; s++) {
+		unsigned char c = (unsigned char)*s;
+		if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t') {
+			n += 2;
+		}
+		else if (c < 0x20) {
+			n += 6;
+		}
+		else {
+			n += 1;
+		}
+	}
+	return n;
+}
+
+static char *json_escape_dup(const char *s) {
+	size_t n = json_escaped_len(s);
+	char *out = (char *)malloc(n + 1);
+	if (!out) {
+		return NULL;
+	}
+	char *p = out;
+	if (s) {
+		for (; *s; s++) {
+			unsigned char c = (unsigned char)*s;
+			switch (c) {
+				case '"':
+					*p++ = '\\';
+					*p++ = '"';
+					break;
+				case '\\':
+					*p++ = '\\';
+					*p++ = '\\';
+					break;
+				case '\n':
+					*p++ = '\\';
+					*p++ = 'n';
+					break;
+				case '\r':
+					*p++ = '\\';
+					*p++ = 'r';
+					break;
+				case '\t':
+					*p++ = '\\';
+					*p++ = 't';
+					break;
+				default:
+					if (c < 0x20) {
+						sprintf(p, "\\u%04x", c);
+						p += 6;
+					}
+					else {
+						*p++ = (char)c;
+					}
+					break;
+			}
+		}
+	}
+	*p = 0;
+	return out;
+}
+
 char *fido_build_client_data_json(const char *type, const char *challenge_b64,
 	const char *origin) {
 	const char *t = type ? type : "webauthn.get";
 	const char *c = challenge_b64 ? challenge_b64 : "";
 	const char *o = origin ? origin : "";
-	size_t len = 64 + strlen(t) + strlen(c) + strlen(o);
+	char *et = json_escape_dup(t);
+	char *ec = json_escape_dup(c);
+	char *eo = json_escape_dup(o);
+	if (!et || !ec || !eo) {
+		free(et);
+		free(ec);
+		free(eo);
+		return NULL;
+	}
+	size_t len = 64 + strlen(et) + strlen(ec) + strlen(eo);
 	char *buf = (char *)malloc(len);
 	if (!buf) {
+		free(et);
+		free(ec);
+		free(eo);
 		return NULL;
 	}
 	snprintf(buf, len,
-		"{\"type\":\"%s\",\"challenge\":\"%s\",\"origin\":\"%s\",\"crossOrigin\":false}", t, c,
-		o);
+		"{\"type\":\"%s\",\"challenge\":\"%s\",\"origin\":\"%s\",\"crossOrigin\":false}", et, ec,
+		eo);
+	free(et);
+	free(ec);
+	free(eo);
 	return buf;
 }
 

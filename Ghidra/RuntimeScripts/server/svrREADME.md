@@ -229,7 +229,12 @@ The Ghidra Server has been designed to support many  possible user authenticatio
 		
 * __FIDO2 security key (-a5)__: User authentication is performed with a FIDO2/WebAuthn security key.
   The WebAuthn relying-party ID is the hostname published by `-ip` (`java.rmi.server.hostname`).
-  Set `-ip` to a stable hostname clients use to reach the server. Anonymous access (`-anonymous`) is
+  **`-ip` is required** and must be a stable hostname (not a non-loopback IP address) that clients
+  type in the Ghidra server dialog. Changing `-ip` after enrollment invalidates every credential.
+  Clients refuse to touch a security key if the connected host does not match that RP ID
+  (loopback aliases such as `localhost` / `127.0.0.1` are treated as the same). The login dialog
+  shows the relying party ID; cancel if it does not match the server you intended.
+  Anonymous access (`-anonymous`) is
   not allowed. SSH authentication (`-ssh`) is ignored. Users must still be added with
   `svrAdmin -add` before they can enroll a key.
 
@@ -246,9 +251,13 @@ The Ghidra Server has been designed to support many  possible user authenticatio
   statically links libfido2; no extra Homebrew or distro libfido2 package is required.
   Linux clients need extra udev rules only if FIDO2 security keys have never worked in a
   browser on that machine. A fallback snippet is shipped as
-  `Ghidra/Framework/FileSystem/data/70-ghidra-fido.rules`. Copy it to `/etc/udev/rules.d/` and
+  `Ghidra/Framework/FileSystem/data/70-ghidra-fido.rules` (FIDO usage-page devices only).
+  Copy it to `/etc/udev/rules.d/` and
   reload udev if needed. Do not install it if Chrome or Firefox can already use the key.
   Windows clients use the platform WebAuthn API.
+  Enrollment uses `fmt=none` attestation; stored AAGUID values are informational and are not a
+  hardware policy. Treat enroll tokens like password-reset codes and run `svrAdmin -fido-list`
+  after a user enrolls. Restrict who can reach the Ghidra Server port.
 
 * __Use of an SSH pre-shared key (-ssh</)__: Supported as an alternate form of authentication when 
   using Local Ghidra password (`-a0`). This SSH authentication is currently supported by the 
@@ -290,8 +299,8 @@ IPv4 address, if this fails the local loopback address is used.  The server log 
 remote access hostname at startup.  This option may be required when a server has multiple IP 
 interfaces, running within a docker container, or relies on a dynamic DNS or other network address 
 translation for incoming connections.  This option establishes the property value for 
-_java.rmi.server.hostname_.  When using FIDO2 authentication (`-a5`), this hostname is the WebAuthn
-relying-party ID.  When this option specifies a hostname, and the _-Dghidra.keystore_ JVM 
+_java.rmi.server.hostname_.  When using FIDO2 authentication (`-a5`), this hostname is required and is the WebAuthn
+relying-party ID. Clients must connect using that hostname. When this option specifies a hostname, and the _-Dghidra.keystore_ JVM 
 property has not been specified, it is generally required that the _-ipAlt_ option be included to 
 specify the IP Address which corresponds to the hostname.
 

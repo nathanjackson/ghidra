@@ -470,7 +470,8 @@ __*NOTE:__ The use of OpenSSH keys are not supported. The following command can 
 a suitable SSH key while avoiding the unsupported OpenSSH format: `ssh-keygen -b 2048 -t rsa -m pem`
 
 When the Ghidra Server uses FIDO2 authentication (`-a5`), Headless Analyzer runs the platform
-`ghidra-fido` helper and prints `Touch your security key` to `stderr`. A security key must be
+`ghidra-fido` helper and prints the relying party ID and `Touch your security key` to `stderr`.
+The connected server host must match that RP ID. A security key must be
 present. Linux and macOS helpers statically link libfido2; no extra libfido2 package is
 required. The login user ID comes from [`-connect`][connect] when specified, otherwise the process
 owner. Optional enrollment uses `GHIDRA_FIDO_ENROLL_TOKEN`. Prefer the interactive console PIN

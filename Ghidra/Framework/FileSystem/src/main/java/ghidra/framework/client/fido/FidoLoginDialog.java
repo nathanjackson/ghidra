@@ -44,11 +44,13 @@ public class FidoLoginDialog extends DialogComponentProvider {
 	private final FidoAuthenticationCallback fidoCb;
 	private final FidoAuthenticator authenticator;
 	private final FidoAllowCredentialsLookup allowLookup;
+	private final String connectedHost;
 	private final boolean allowUserNameEntry;
 
 	private JTextField nameField;
 	private JPasswordField pinField;
 	private JTextField enrollTokenField;
+	private JLabel rpIdLabel;
 
 	private final AtomicBoolean cancelled = new AtomicBoolean();
 	private final AtomicBoolean finished = new AtomicBoolean();
@@ -80,6 +82,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 		this.fidoCb = fidoCb;
 		this.authenticator = authenticator;
 		this.allowLookup = allowLookup;
+		this.connectedHost = serverName;
 		this.allowUserNameEntry = nameCb != null;
 
 		setRememberSize(false);
@@ -109,6 +112,15 @@ public class FidoLoginDialog extends DialogComponentProvider {
 		if (serverName != null) {
 			workPanel.add(new GLabel("Server:"));
 			workPanel.add(new GLabel(serverName));
+		}
+
+		String rpId = fidoCb.getRpId();
+		if (rpId != null) {
+			workPanel.add(new GLabel("Relying party:"));
+			rpIdLabel = new GLabel(rpId);
+			rpIdLabel.setName("RP-ID-COMPONENT");
+			rpIdLabel.getAccessibleContext().setAccessibleName("Relying party ID");
+			workPanel.add(rpIdLabel);
 		}
 
 		String defaultUser = defaultUserName();
@@ -196,7 +208,7 @@ public class FidoLoginDialog extends DialogComponentProvider {
 				Swing.runNow(this::finishCancelled);
 				return;
 			}
-			authenticator.complete(fidoCb, userName, enrollToken, allow, pin);
+			authenticator.complete(fidoCb, userName, enrollToken, allow, pin, connectedHost);
 			if (nameCb != null) {
 				nameCb.setName(userName);
 			}
@@ -322,6 +334,10 @@ public class FidoLoginDialog extends DialogComponentProvider {
 
 	JTextField getEnrollTokenField() {
 		return enrollTokenField;
+	}
+
+	JLabel getRpIdLabel() {
+		return rpIdLabel;
 	}
 
 	String currentUserName() {
